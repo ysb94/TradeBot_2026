@@ -1,6 +1,16 @@
 # config.py
 # 설정값 (API Key, 목표 수익률 등)
 
+import os
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()  # .env 로드 (프로젝트 루트의 .env)
+except Exception:
+    # python-dotenv 미설치/미사용 환경에서도 동작하게 둠
+    pass
+
 
 
 # 환율 설정 (추후 실시간 크롤링으로 대체 예정)
@@ -32,8 +42,8 @@ IS_SIMULATION = True  # True: 모의투자(로그만 출력), False: 실전매�
 
 # 업비트 API 키 (IS_SIMULATION = False 일 때만 사용됨)
 # 업비트 웹사이트 > 마이페이지 > Open API 관리에서 발급
-UPBIT_ACCESS_KEY = "7CVAVfYeybkxohYeLxqz2i0jpxy7V2B714nkGCSN"
-UPBIT_SECRET_KEY = "tnSYI60eEIzMrO9Uo4iBCOg9Hn1XRFqJsj38AmtN"
+UPBIT_ACCESS_KEY = os.getenv("UPBIT_ACCESS_KEY", "")
+UPBIT_SECRET_KEY = os.getenv("UPBIT_SECRET_KEY", "")
 
 # 1회 매수 금액 (KRW)
 TRADE_AMOUNT = 6000 # 테스트용 6천원 (업비트 최소 주문금액 5천원)

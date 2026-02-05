@@ -11,3 +11,4 @@ ccxt
 websockets
 aiohttp
 asyncio
+python-dotenv
