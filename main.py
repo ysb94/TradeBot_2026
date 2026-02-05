@@ -1,66 +1,91 @@
 # main.py
-# 프로그램 시작점 (비동기 루프 실행)
+# 봇의 메인 로직을 담당하는 파일입니다. 데이터 수집, 신호 판단, 주문 처리를 담당합니다.
 
 import asyncio
 from data_feed.aggregator import DataAggregator
 from strategy.signal_maker import SignalMaker
-from execution.order_manager import OrderManager # 추가됨
-from config import TARGET_COIN_TICKER_UPBIT, TRADE_AMOUNT
+from execution.order_manager import OrderManager
+from config import TARGET_COINS, TRADE_AMOUNT, STOP_LOSS_PCT, TAKE_PROFIT_PCT, IS_SIMULATION
 
 async def main():
     print("========================================")
-    print("   🤖 2026 Hybrid Trading Bot - v0.3   ")
-    print("   Step 4: Full System Integrated       ")
+    print("   🐙 2026 Octopus Trading Bot - Final ")
+    print("   Mode: " + ("🧪 Simulation" if IS_SIMULATION else "💳 Real Trading"))
     print("========================================")
     
-    # 모듈 초기화
     aggregator = DataAggregator()
     signal_maker = SignalMaker()
-    order_manager = OrderManager() # 주문 관리자 생성
+    order_manager = OrderManager()
     
     # 데이터 수집 시작
     asyncio.create_task(aggregator.run())
-
-    print("⏳ 데이터 수집 및 초기화 중... (3초)")
+    print("⏳ 데이터 동기화 중... (3초)")
     await asyncio.sleep(3)
 
     while True:
         try:
-            upbit_price = aggregator.prices["upbit"]
-            current_kimp = aggregator.kimchi_premium
+            print("\r", end="", flush=True) # 줄바꿈 초기화
 
-            if upbit_price is not None and current_kimp is not None:
-                # 1. 매수 신호 점검
-                is_buy, reason = signal_maker.check_buy_signal(
-                    TARGET_COIN_TICKER_UPBIT, 
-                    upbit_price, 
-                    current_kimp
-                )
+            for ticker in TARGET_COINS.keys():
+                # 1. 데이터 가져오기
+                data = aggregator.market_data[ticker]
+                current_price = data['upbit']
+                current_kimp = data['kimp']
 
-                status_color = "🟢" if is_buy else "⚪"
-                
-                # 2. 상태 출력
-                print(f"\r[{status_color}] 현재가: {upbit_price:,.0f} | 김프: {current_kimp:+.2f}% | 상태: {reason}          ", end="", flush=True)
+                if current_price is None or current_kimp is None:
+                    continue
 
-                # 3. 매수 실행 로직
-                if is_buy:
-                    # 현재 잔고 확인
-                    balance = order_manager.get_balance("KRW")
+                # 2. 보유 상태 확인
+                balance = order_manager.get_balance(ticker)
+                avg_price = order_manager.get_avg_buy_price(ticker)
+                has_coin = balance > 0 and (balance * current_price) > 5000 # 5천원 이상 보유 시
+
+                # --- [A] 매도 로직 (보유 중일 때) ---
+                if has_coin:
+                    # 수익률 계산
+                    profit_pct = ((current_price - avg_price) / avg_price) * 100
                     
-                    if balance >= TRADE_AMOUNT:
-                        # 주문 실행
-                        order_manager.buy_market_order(TARGET_COIN_TICKER_UPBIT, TRADE_AMOUNT)
-                        
-                        # 매수 후에는 중복 매수를 막기 위해 잠시 대기 (예: 1분)
-                        print("\n⏸️ 매수 체결로 인해 잠시 대기합니다...")
-                        await asyncio.sleep(60) 
-                    else:
-                        print("\n❌ 잔고 부족으로 매수 실패")
+                    # 상태 표시 (수익률 포함)
+                    print(f"[{ticker.split('-')[1]} {profit_pct:+.2f}%] ", end="", flush=True)
 
-            await asyncio.sleep(3)
+                    # 익절 또는 손절 조건 확인
+                    if profit_pct >= TAKE_PROFIT_PCT: # 익절 (+1.0%)
+                        print(f"\n🎉 {ticker} 익절! 수익률: {profit_pct:.2f}%")
+                        order_manager.sell_market_order(ticker, balance)
+                    
+                    elif profit_pct <= STOP_LOSS_PCT: # 손절 (-1.5%)
+                        print(f"\n💧 {ticker} 손절... 수익률: {profit_pct:.2f}%")
+                        order_manager.sell_market_order(ticker, balance)
+
+                # --- [B] 매수 로직 (미보유 중일 때) ---
+                else:
+                    is_buy, reason = signal_maker.check_buy_signal(
+                        ticker, current_price, current_kimp
+                    )
+                    
+                    icon = "🟢" if is_buy else "⚪"
+                    print(f"[{ticker.split('-')[1]} {icon}] ", end="", flush=True)
+
+                    if is_buy:
+                        print(f"\n🔥 {ticker} 진입! ({reason})")
+                        
+                        # KRW 잔고 확인
+                        krw_balance = order_manager.get_balance("KRW")
+                        if krw_balance >= TRADE_AMOUNT:
+                            # 주문 실행
+                            res = order_manager.buy_market_order(ticker, TRADE_AMOUNT)
+                            if res:
+                                # (모의투자용) 가상 지갑 업데이트
+                                order_manager.simulation_buy(ticker, TRADE_AMOUNT, current_price)
+                                # 연속 주문 방지 쿨타임
+                                await asyncio.sleep(2) 
+                        else:
+                            print("❌ 잔고 부족")
+
+            await asyncio.sleep(1) # 1초마다 갱신
 
         except Exception as e:
-            print(f"\n⚠️ Main Loop Error: {e}")
+            print(f"\n⚠️ Error: {e}")
             await asyncio.sleep(1)
 
 if __name__ == "__main__":
@@ -68,4 +93,4 @@ if __name__ == "__main__":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n\n🛑 봇을 종료합니다.")
+        print("\n\n🛑 봇 종료")

@@ -18,13 +18,17 @@ except Exception:
 CURRENT_EXCHANGE_RATE = 1450.0 
 
 # 타겟 코인 설정 (일단 대장주 비트코인으로 테스트)
-TARGET_COIN_TICKER_UPBIT = "KRW-BTC"
-TARGET_COIN_SYMBOL_BINANCE = "BTC/USDT"
-
+TARGET_COINS = {
+    "KRW-BTC": "btcusdt",
+    "KRW-ETH": "ethusdt",
+    "KRW-SOL": "solusdt",
+    "KRW-XRP": "xrpusdt",
+    "KRW-DOGE": "dogeusdt"
+}
 # [전략 설정]
 # 1. 기술적 지표 기준
 RSI_PERIOD = 14
-RSI_BUY_THRESHOLD = 70      # (기존 30 -> 70 수정)
+RSI_BUY_THRESHOLD = 80      # (기존 30 -> 70 수정)
 BB_MULTIPLIER = 2.0         # 볼린저 밴드 승수
 
 # 2. 김치 프리미엄 필터

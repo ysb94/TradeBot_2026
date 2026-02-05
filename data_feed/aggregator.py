@@ -4,80 +4,89 @@
 import asyncio
 import json
 import websockets
-from config import CURRENT_EXCHANGE_RATE, TARGET_COIN_TICKER_UPBIT
+from config import CURRENT_EXCHANGE_RATE, TARGET_COINS
 
 class DataAggregator:
     def __init__(self):
-        self.prices = {
-            "upbit": None,
-            "binance": None
+        # 다중 종목 데이터 저장소 초기화
+        # 구조: { "KRW-BTC": {"upbit": 0, "binance": 0, "kimp": 0}, ... }
+        self.market_data = {
+            ticker: {"upbit": None, "binance": None, "kimp": None} 
+            for ticker in TARGET_COINS.keys()
         }
-        self.kimchi_premium = None
+        
+        # 바이낸스 심볼 역참조용 (btcusdt -> KRW-BTC 찾기 위해)
+        self.binance_map = {v: k for k, v in TARGET_COINS.items()}
 
     async def connect_upbit(self):
-        """업비트 웹소켓 연결"""
+        """업비트: 여러 종목 한 번에 구독"""
         uri = "wss://api.upbit.com/websocket/v1"
-        
+        target_codes = list(TARGET_COINS.keys()) # ["KRW-BTC", "KRW-SOL", ...]
+
         while True:
             try:
                 async with websockets.connect(uri) as websocket:
                     subscribe_fmt = [
-                        {"ticket": "test-bot"},
-                        {"type": "ticker", "codes": [TARGET_COIN_TICKER_UPBIT]}
+                        {"ticket": "octopus-bot"},
+                        {"type": "ticker", "codes": target_codes}
                     ]
                     await websocket.send(json.dumps(subscribe_fmt))
-                    print("✅ [Upbit] WebSocket Connected")
+                    print(f"✅ [Upbit] 5개 종목 구독 완료: {target_codes}")
 
                     while True:
                         data = await websocket.recv()
                         data = json.loads(data)
-                        self.prices["upbit"] = float(data['trade_price'])
-                        await self.update_dashboard()
+                        code = data['code']
+                        price = float(data['trade_price'])
+                        
+                        # 데이터 업데이트
+                        self.market_data[code]['upbit'] = price
+                        self.calculate_kimp(code)
                         
             except Exception as e:
-                print(f"⚠️ [Upbit] Connection Error: {e}")
+                print(f"⚠️ [Upbit] Error: {e}")
                 await asyncio.sleep(2)
 
     async def connect_binance(self):
-        """바이낸스 웹소켓 연결 (Raw Stream 사용 - CCXT 제거)"""
-        # 바이낸스 BTC/USDT 실시간 티커 스트림 URL
-        # symbol은 소문자로 써야 함 (btcusdt)
-        uri = "wss://stream.binance.com:9443/ws/btcusdt@ticker"
+        """바이낸스: Combined Stream으로 여러 종목 한 번에 구독"""
+        # 스트림 형식: streamname1/streamname2/...
+        streams = "/".join([f"{sym}@ticker" for sym in TARGET_COINS.values()])
+        uri = f"wss://stream.binance.com:9443/stream?streams={streams}"
         
         while True:
             try:
-                print("✅ [Binance] WebSocket Connecting...")
+                print(f"✅ [Binance] 다중 스트림 연결 시도...")
                 async with websockets.connect(uri) as websocket:
-                    print("✅ [Binance] WebSocket Connected")
+                    print("✅ [Binance] 연결 성공!")
                     
                     while True:
-                        data = await websocket.recv()
-                        data = json.loads(data)
+                        resp = await websocket.recv()
+                        resp = json.loads(resp)
+                        # resp 구조: {"stream": "btcusdt@ticker", "data": {...}}
                         
-                        # 바이낸스 스트림 데이터에서 'c'는 현재가(Current Price)를 의미
-                        if 'c' in data:
-                            self.prices["binance"] = float(data['c'])
-                            await self.update_dashboard()
+                        stream_name = resp['stream'] # 예: btcusdt@ticker
+                        symbol = stream_name.split('@')[0] # btcusdt
+                        price = float(resp['data']['c']) # 현재가
+                        
+                        # 해당 심볼의 업비트 코드 찾기
+                        if symbol in self.binance_map:
+                            upbit_code = self.binance_map[symbol]
+                            self.market_data[upbit_code]['binance'] = price
+                            self.calculate_kimp(upbit_code)
                             
             except Exception as e:
-                print(f"⚠️ [Binance] Connection Error: {e}")
+                print(f"⚠️ [Binance] Error: {e}")
                 await asyncio.sleep(2)
 
-    async def update_dashboard(self):
-        """데이터 통합 및 김프 계산"""
-        upbit_price = self.prices["upbit"]
-        binance_price = self.prices["binance"]
+    def calculate_kimp(self, code):
+        """개별 코인 김프 계산"""
+        u_price = self.market_data[code]['upbit']
+        b_price = self.market_data[code]['binance']
 
-        if upbit_price and binance_price:
-            # 김프 계산
-            binance_krw = binance_price * CURRENT_EXCHANGE_RATE
-            self.kimchi_premium = ((upbit_price - binance_krw) / binance_krw) * 100
-            
-            # ▼▼▼ [수정] 이 부분 주석 처리 (#) 또는 삭제 ▼▼▼
-            # print(f"\r[실시간] Upbit: {upbit_price:,.0f} KRW | "
-            #       f"Binance: ${binance_price:,.2f} | "
-            #       f"김프: {self.kimchi_premium:+.2f}%   ", end="", flush=True)
-            pass
+        if u_price and b_price:
+            b_krw = b_price * CURRENT_EXCHANGE_RATE
+            kimp = ((u_price - b_krw) / b_krw) * 100
+            self.market_data[code]['kimp'] = kimp
 
     async def run(self):
         await asyncio.gather(
