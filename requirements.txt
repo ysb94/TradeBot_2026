@@ -1,0 +1,13 @@
+# requirements.txt
+# 라이브러리 목록
+
+
+
+
+#pip install -r requirements.txt
+#pip install pandas numpy
+
+ccxt
+websockets
+aiohttp
+asyncio
