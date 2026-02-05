@@ -5,11 +5,11 @@ import asyncio
 from data_feed.aggregator import DataAggregator
 from strategy.signal_maker import SignalMaker
 from execution.order_manager import OrderManager
-from config import TARGET_COINS, TRADE_AMOUNT, STOP_LOSS_PCT, IS_SIMULATION
+from config import TARGET_COINS, TRADE_AMOUNT, STOP_LOSS_PCT, IS_SIMULATION, FOLLOWER_COINS
 
 async def main():
     print("========================================")
-    print("   🐙 2026 Octopus Trading Bot - Fixed ")
+    print("   🐙 2026 Octopus Bot - Leader Follower ")
     print(f"   Mode: {'🧪 Simulation' if IS_SIMULATION else '💳 Real Trading'}")
     print("========================================")
     
@@ -17,13 +17,9 @@ async def main():
     signal_maker = SignalMaker()
     order_manager = OrderManager()
     
-    # [트레일링 스탑] 각 코인별 최고 수익률 기억장소
-    # 구조: {'KRW-BTC': 1.5, 'KRW-ETH': 0.5 ...} (단위: %)
     trailing_highs = {} 
-
-    # 트레일링 설정 (보고서 전략 반영)
-    TRAILING_START = 0.5  # 0.5% 수익부터 추적 시작
-    TRAILING_DROP = 0.3   # 고점 대비 0.3%p 빠지면 익절
+    TRAILING_START = 0.5  
+    TRAILING_DROP = 0.3   
 
     asyncio.create_task(aggregator.run())
     print("⏳ 데이터 동기화 중... (3초)")
@@ -33,6 +29,32 @@ async def main():
         try:
             print("\r", end="", flush=True) 
 
+            # 🔥 [1. 리더-팔로워 긴급 매수 로직]
+            # RSI 분석보다 우선순위 높음 (인터럽트)
+            if aggregator.surge_detected:
+                print(f"\n\n{aggregator.surge_info}")
+                print("⚡ [FOLLOWER] 추종 코인 긴급 매수 실행!")
+                
+                # 설정된 추종 코인들(SOL, XRP 등) 즉시 매수
+                for coin in FOLLOWER_COINS:
+                    # 이미 보유 중이면 패스 (중복 매수 방지)
+                    if order_manager.get_balance(coin) > 0:
+                        continue
+                        
+                    current_price = aggregator.market_data[coin]['upbit']
+                    if current_price:
+                        res = order_manager.buy_market_order(coin, TRADE_AMOUNT)
+                        if res:
+                            order_manager.simulation_buy(coin, TRADE_AMOUNT, current_price)
+                            trailing_highs[coin] = -100 # 트레일링 초기화
+                
+                # 신호 처리 완료 후 플래그 초기화
+                aggregator.surge_detected = False
+                print("✅ 긴급 매수 완료. 5초간 쿨타임...\n")
+                await asyncio.sleep(5) # 급등 직후 진정될 때까지 대기
+                continue # 루프 처음으로 복귀
+
+            # [2. 일반 루프 (RSI, 트레일링 스탑 등)]
             for ticker in TARGET_COINS.keys():
                 data = aggregator.market_data[ticker]
                 curr_price = data['upbit']
@@ -45,61 +67,41 @@ async def main():
                 avg_price = order_manager.get_avg_buy_price(ticker)
                 has_coin = balance > 0 and (balance * curr_price) > 5000
 
-                # ==============================
-                # [A] 매도 로직 (보유 중) - 트레일링 스탑
-                # ==============================
+                # [A] 매도 로직 (보유 중)
                 if has_coin:
-                    # 수익률 계산 (%)
                     profit_pct = ((curr_price - avg_price) / avg_price) * 100
                     
-                    # 1. 고점 갱신 (Trailing High Update)
-                    if ticker not in trailing_highs:
-                        trailing_highs[ticker] = profit_pct
-                    else:
-                        trailing_highs[ticker] = max(trailing_highs[ticker], profit_pct)
-                    
+                    if ticker not in trailing_highs: trailing_highs[ticker] = profit_pct
+                    else: trailing_highs[ticker] = max(trailing_highs[ticker], profit_pct)
                     current_high = trailing_highs[ticker]
                     
-                    # 상태 표시
-                    print(f"[{ticker.split('-')[1]} {profit_pct:+.2f}%(고:{current_high:.1f})] ", end="", flush=True)
+                    print(f"[{ticker.split('-')[1]} {profit_pct:+.2f}%] ", end="", flush=True)
 
-                    # 2. 매도 조건 판단
-                    # 2-1. 손절 (Stop Loss)
                     if profit_pct <= STOP_LOSS_PCT:
-                        print(f"\n💧 {ticker} 손절 (-1.5% 도달)")
-                        res = order_manager.sell_market_order(ticker, balance)
-                        if res: 
+                        print(f"\n💧 {ticker} 손절")
+                        if order_manager.sell_market_order(ticker, balance): 
                             order_manager.simulation_sell(ticker, curr_price)
-                            del trailing_highs[ticker] # 기록 삭제
+                            del trailing_highs[ticker]
 
-                    # 2-2. 트레일링 익절 (Trailing Stop)
-                    # 목표 수익(0.5%) 이상이고 + 고점 대비(0.3%) 하락 시
                     elif current_high >= TRAILING_START and (current_high - profit_pct) >= TRAILING_DROP:
-                        print(f"\n🎉 {ticker} 트레일링 익절! (고점 {current_high:.2f}% -> 현재 {profit_pct:.2f}%)")
-                        res = order_manager.sell_market_order(ticker, balance)
-                        if res: 
+                        print(f"\n🎉 {ticker} 트레일링 익절!")
+                        if order_manager.sell_market_order(ticker, balance): 
                             order_manager.simulation_sell(ticker, curr_price)
-                            del trailing_highs[ticker] # 기록 삭제
+                            del trailing_highs[ticker]
 
-                # ==============================
-                # [B] 매수 로직 (미보유 중)
-                # ==============================
+                # [B] 매수 로직 (일반 RSI 전략)
                 else:
                     is_buy, reason = signal_maker.check_buy_signal(ticker, curr_price, curr_kimp)
                     icon = "🟢" if is_buy else "⚪"
                     print(f"[{ticker.split('-')[1]} {icon}] ", end="", flush=True)
 
                     if is_buy:
-                        print(f"\n🔥 {ticker} 진입! ({reason})")
-                        krw = order_manager.get_balance("KRW")
-                        if krw >= TRADE_AMOUNT:
-                            res = order_manager.buy_market_order(ticker, TRADE_AMOUNT)
-                            if res:
+                        print(f"\n🔥 {ticker} 일반 진입! ({reason})")
+                        if order_manager.get_balance("KRW") >= TRADE_AMOUNT:
+                            if order_manager.buy_market_order(ticker, TRADE_AMOUNT):
                                 order_manager.simulation_buy(ticker, TRADE_AMOUNT, curr_price)
-                                trailing_highs[ticker] = -100 # 초기화
-                                await asyncio.sleep(1) # 연속 주문 방지
-                        else:
-                            print("❌ 잔고 부족")
+                                trailing_highs[ticker] = -100
+                                await asyncio.sleep(1)
 
             await asyncio.sleep(1)
 

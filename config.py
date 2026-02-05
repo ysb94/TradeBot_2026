@@ -63,3 +63,14 @@ IS_SIMULATION = True  # True: 모의투자, False: 실전매매
 UPBIT_ACCESS_KEY = os.getenv("UPBIT_ACCESS_KEY", "")
 UPBIT_SECRET_KEY = os.getenv("UPBIT_SECRET_KEY", "")
 TRADE_AMOUNT = 6000
+
+
+# -----------------------------------------------------
+# [5. 바이낸스 리더-팔로워 설정 (신규 추가)]
+# -----------------------------------------------------
+# 바이낸스 BTC가 "1초(또는 직전 틱)" 만에 이만큼 오르면 급등으로 판단
+BINANCE_SURGE_THRESHOLD = 0.3 # 단위: % (0.3% 급등은 초단기적으로 매우 큰 수치임)
+
+# BTC 급등 시 업비트에서 따라서 살 "추종자(Follower)" 코인들
+# (베타 계수가 높고 반응 속도가 빠른 메이저 알트 추천)
+FOLLOWER_COINS = ["KRW-SOL", "KRW-XRP", "KRW-DOGE", "KRW-ETH"]
