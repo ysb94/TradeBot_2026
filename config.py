@@ -1,53 +1,65 @@
-# config.py
-# 설정값 (API Key, 목표 수익률 등)
-
 import os
 
 try:
     from dotenv import load_dotenv
-
-    load_dotenv()  # .env 로드 (프로젝트 루트의 .env)
+    load_dotenv()
 except Exception:
-    # python-dotenv 미설치/미사용 환경에서도 동작하게 둠
     pass
 
-
-
-# 환율 설정 (추후 실시간 크롤링으로 대체 예정)
-# 현재 대략적인 환율을 입력하세요 (예: 1450원)
+# [1. 기본 설정]
 CURRENT_EXCHANGE_RATE = 1450.0 
 
-# 타겟 코인 설정 (일단 대장주 비트코인으로 테스트)
+# 🐙 [다중 종목 감시 설정 - 20개로 확대]
+# 업비트 티커 : 바이낸스 웹소켓 심볼 (소문자 필수)
 TARGET_COINS = {
+    # --- 메이저 (대장주) ---
     "KRW-BTC": "btcusdt",
     "KRW-ETH": "ethusdt",
     "KRW-SOL": "solusdt",
     "KRW-XRP": "xrpusdt",
-    "KRW-DOGE": "dogeusdt"
+    "KRW-ADA": "adausdt",
+    
+    # --- 밈 코인 (변동성 최상) ---
+    "KRW-DOGE": "dogeusdt",
+    "KRW-SHIB": "shibusdt",
+    "KRW-PEPE": "pepeusdt",
+    
+    # --- 레이어1 / 플랫폼 (거래량 상위) ---
+    "KRW-AVAX": "avaxusdt",
+    "KRW-TRX": "trxusdt",
+    "KRW-DOT": "dotusdt",
+    "KRW-LINK": "linkusdt",
+    "KRW-ETC": "etcusdt",
+    "KRW-BCH": "bchusdt",
+    
+    # --- 메타버스 / 게이밍 / AI ---
+    "KRW-SAND": "sandusdt",
+    "KRW-MANA": "manausdt",
+    "KRW-NEAR": "nearusdt",
+    "KRW-STX": "stxusdt",     # 비트코인 생태계
+    "KRW-SUI": "suiusdt",     # 신규 메이저
+    "KRW-SEI": "seiusdt"
 }
-# [전략 설정]
-# 1. 기술적 지표 기준
+
+# [2. 전략 설정]
 RSI_PERIOD = 14
-RSI_BUY_THRESHOLD = 80      # (기존 30 -> 70 수정)
-BB_MULTIPLIER = 2.0         # 볼린저 밴드 승수
+RSI_BUY_THRESHOLD = 80      # (테스트용: 80, 실전 추천: 30)
+BB_MULTIPLIER = 2.0         
 
-# 2. 김치 프리미엄 필터
-MAX_KIMP_THRESHOLD = 10.0    # (기존 5.0 -> 10.0 수정)
-REVERSE_KIMP_THRESHOLD = -1.0 # 역프(-1%) 발생 시 적극 매수
 
-# 3. 리스크 관리
-STOP_LOSS_PCT = -1.5        # -1.5% 도달 시 손절
-TAKE_PROFIT_PCT = 1.0       # 1.0% 도달 시 익절
+# [추가됨] 틱 가치 필터 설정
+# 본전(BEP)까지 가는데 15틱 이상 올라야 한다면 진입 금지 (변동성 대비 효율 낮음)
+MAX_TICKS_FOR_BEP = 15
 
+
+# [3. 리스크 관리]
+MAX_KIMP_THRESHOLD = 10.0    # (테스트용: 10%, 실전 추천: 5%)
+REVERSE_KIMP_THRESHOLD = -1.0
+STOP_LOSS_PCT = -1.5        # -1.5% 손절
+TAKE_PROFIT_PCT = 1.0       # 1.0% 익절
 
 # [4. 주문 및 API 설정]
-# 주의: 실제 돈을 쓰지 않으려면 True로 설정하세요.
-IS_SIMULATION = True  # True: 모의투자(로그만 출력), False: 실전매매
-
-# 업비트 API 키 (IS_SIMULATION = False 일 때만 사용됨)
-# 업비트 웹사이트 > 마이페이지 > Open API 관리에서 발급
+IS_SIMULATION = True  # True: 모의투자, False: 실전매매
 UPBIT_ACCESS_KEY = os.getenv("UPBIT_ACCESS_KEY", "")
 UPBIT_SECRET_KEY = os.getenv("UPBIT_SECRET_KEY", "")
-
-# 1회 매수 금액 (KRW)
-TRADE_AMOUNT = 6000 # 테스트용 6천원 (업비트 최소 주문금액 5천원)
+TRADE_AMOUNT = 6000
