@@ -30,14 +30,11 @@ async def main():
             print("\r", end="", flush=True) 
 
             # 🔥 [1. 리더-팔로워 긴급 매수 로직]
-            # RSI 분석보다 우선순위 높음 (인터럽트)
             if aggregator.surge_detected:
                 print(f"\n\n{aggregator.surge_info}")
                 print("⚡ [FOLLOWER] 추종 코인 긴급 매수 실행!")
                 
-                # 설정된 추종 코인들(SOL, XRP 등) 즉시 매수
                 for coin in FOLLOWER_COINS:
-                    # 이미 보유 중이면 패스 (중복 매수 방지)
                     if order_manager.get_balance(coin) > 0:
                         continue
                         
@@ -46,13 +43,12 @@ async def main():
                         res = order_manager.buy_market_order(coin, TRADE_AMOUNT)
                         if res:
                             order_manager.simulation_buy(coin, TRADE_AMOUNT, current_price)
-                            trailing_highs[coin] = -100 # 트레일링 초기화
+                            trailing_highs[coin] = -100 
                 
-                # 신호 처리 완료 후 플래그 초기화
                 aggregator.surge_detected = False
                 print("✅ 긴급 매수 완료. 5초간 쿨타임...\n")
-                await asyncio.sleep(5) # 급등 직후 진정될 때까지 대기
-                continue # 루프 처음으로 복귀
+                await asyncio.sleep(5) 
+                continue 
 
             # [2. 일반 루프 (RSI, 트레일링 스탑 등)]
             for ticker in TARGET_COINS.keys():
@@ -60,7 +56,9 @@ async def main():
                 curr_price = data['upbit']
                 curr_kimp = data['kimp']
 
-                if curr_price is None: continue
+                # [수정] 가격이나 김프 중 하나라도 없으면(None) 건너뜀 (에러 방지 핵심!)
+                if curr_price is None or curr_kimp is None:
+                    continue
 
                 # 잔고 확인
                 balance = order_manager.get_balance(ticker)
@@ -106,6 +104,7 @@ async def main():
             await asyncio.sleep(1)
 
         except Exception as e:
+            # 에러가 나도 죽지 않고 로그만 찍고 재시도
             print(f"\n⚠️ Error: {e}")
             await asyncio.sleep(1)
 
