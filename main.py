@@ -18,6 +18,9 @@ async def main():
     order_manager = OrderManager()
     
     trailing_highs = {} 
+    # [설정] 트레일링 익절 기준
+    # 0.5% 올랐을 때 감시 시작 -> 고점 대비 0.3% 빠지면 팝니다.
+    # (수정된 로직에서는 수수료 떼고 0.5%이므로 실제로는 0.65% 올라야 발동됨)
     TRAILING_START = 0.5  
     TRAILING_DROP = 0.3   
 
@@ -29,7 +32,22 @@ async def main():
         try:
             print("\r", end="", flush=True) 
 
+            # ---------------------------------------------------------
+            # [수정됨] 0. 실시간 자산 조회 (화면 표시용)
+            # ---------------------------------------------------------
+            current_prices = {}
+            for t, d in aggregator.market_data.items():
+                if d['upbit']: current_prices[t] = d['upbit']
+            
+            # 총 자산 계산 (OrderManager에 새로 만든 함수 호출)
+            total_assets = order_manager.get_total_assets(current_prices)
+            
+            # [출력] 자산 정보를 맨 앞에 표시
+            print(f"💰 {total_assets:,.0f}원 | ", end="", flush=True)
+
+            # ---------------------------------------------------------
             # 🔥 [1. 리더-팔로워 긴급 매수 로직]
+            # ---------------------------------------------------------
             if aggregator.surge_detected:
                 print(f"\n\n{aggregator.surge_info}")
                 print("⚡ [FOLLOWER] 추종 코인 긴급 매수 실행!")
@@ -50,24 +68,30 @@ async def main():
                 await asyncio.sleep(5) 
                 continue 
 
+            # ---------------------------------------------------------
             # [2. 일반 루프 (RSI, 트레일링 스탑 등)]
+            # ---------------------------------------------------------
             for ticker in TARGET_COINS.keys():
                 data = aggregator.market_data[ticker]
                 curr_price = data['upbit']
                 curr_kimp = data['kimp']
 
-                # [수정] 가격이나 김프 중 하나라도 없으면(None) 건너뜀 (에러 방지 핵심!)
+                # 데이터가 아직 없으면 건너뜀
                 if curr_price is None or curr_kimp is None:
                     continue
 
                 # 잔고 확인
                 balance = order_manager.get_balance(ticker)
                 avg_price = order_manager.get_avg_buy_price(ticker)
+                # 평가금 5000원 이상일 때만 보유로 인정 (자투리 제외)
                 has_coin = balance > 0 and (balance * curr_price) > 5000
 
                 # [A] 매도 로직 (보유 중)
                 if has_coin:
-                    profit_pct = ((curr_price - avg_price) / avg_price) * 100
+                    # 💰 [수수료 반영 수정 핵심!] 
+                    # 단순 수익률에서 0.15%를 뺍니다. (수수료 0.1% + 슬리피지 0.05%)
+                    raw_profit = ((curr_price - avg_price) / avg_price) * 100
+                    profit_pct = raw_profit - 0.15  
                     
                     if ticker not in trailing_highs: trailing_highs[ticker] = profit_pct
                     else: trailing_highs[ticker] = max(trailing_highs[ticker], profit_pct)
@@ -75,14 +99,17 @@ async def main():
                     
                     print(f"[{ticker.split('-')[1]} {profit_pct:+.2f}%] ", end="", flush=True)
 
+                    # 1. 손절 조건
                     if profit_pct <= STOP_LOSS_PCT:
                         print(f"\n💧 {ticker} 손절")
                         if order_manager.sell_market_order(ticker, balance): 
                             order_manager.simulation_sell(ticker, curr_price)
                             del trailing_highs[ticker]
 
+                    # 2. 익절 조건 (트레일링 스탑)
+                    # 수수료 떼고도 0.5% 이상 벌어야 발동됨
                     elif current_high >= TRAILING_START and (current_high - profit_pct) >= TRAILING_DROP:
-                        print(f"\n🎉 {ticker} 트레일링 익절!")
+                        print(f"\n🎉 {ticker} 트레일링 익절! (실수익 확보)")
                         if order_manager.sell_market_order(ticker, balance): 
                             order_manager.simulation_sell(ticker, curr_price)
                             del trailing_highs[ticker]
@@ -104,7 +131,6 @@ async def main():
             await asyncio.sleep(1)
 
         except Exception as e:
-            # 에러가 나도 죽지 않고 로그만 찍고 재시도
             print(f"\n⚠️ Error: {e}")
             await asyncio.sleep(1)
 

@@ -71,3 +71,38 @@ class OrderManager:
         self.sim_krw += sell_amount
         del self.sim_holdings[ticker]
         print(f"   [지갑] {ticker} 매도됨. 회수금: {sell_amount:,.0f}원 | 잔액: {self.sim_krw:,.0f}원")
+
+    def get_total_assets(self, current_prices):
+        """
+        현재 총 자산(현금 + 보유 코인 평가금) 계산
+        current_prices: {ticker: price, ...} 딕셔너리 (main.py에서 넘겨줌)
+        """
+        total_value = 0.0
+        
+        if self.is_simulation:
+            # 1. 현금
+            total_value = self.sim_krw
+            # 2. 보유 코인 (평가금 = 수량 * 현재가)
+            for ticker, info in self.sim_holdings.items():
+                if ticker in current_prices and current_prices[ticker] is not None:
+                    total_value += info['vol'] * current_prices[ticker]
+        else:
+            try:
+                # 실전 모드: 업비트 API로 전체 잔고 조회
+                balances = self.upbit.get_balances()
+                for b in balances:
+                    if b['currency'] == 'KRW':
+                        total_value += float(b['balance']) + float(b['locked'])
+                    else:
+                        # 코인인 경우
+                        ticker = f"KRW-{b['currency']}"
+                        vol = float(b['balance']) + float(b['locked'])
+                        
+                        # 현재가가 있는 경우 평가금 합산
+                        if ticker in current_prices and current_prices[ticker] is not None:
+                            total_value += vol * current_prices[ticker]
+                        # (참고) 현재가가 딕셔너리에 없으면 평가금에서 제외될 수 있음
+            except Exception as e:
+                print(f"⚠️ 자산 조회 실패: {e}")
+                
+        return total_value

@@ -7,70 +7,64 @@ except Exception:
     pass
 
 # [1. 기본 설정]
-CURRENT_EXCHANGE_RATE = 1450.0 
+# 2026-02-06 시장 진단: 환율 1,465원 반영
+CURRENT_EXCHANGE_RATE = 1465.09 
 
-# 🐙 [다중 종목 감시 설정 - 20개로 확대]
+# 🐙 [다중 종목 감시 설정 - 거래대금 상위 주도주 위주]
 # 업비트 티커 : 바이낸스 웹소켓 심볼 (소문자 필수)
 TARGET_COINS = {
-    # --- 메이저 (대장주) ---
+    # --- 오늘의 대장주 (Top Priority) ---
+    "KRW-XRP": "xrpusdt",   # 거래대금 1위 (2.2조)
     "KRW-BTC": "btcusdt",
     "KRW-ETH": "ethusdt",
+    
+    # --- 변동성 상위 / 밈 코인 ---
     "KRW-SOL": "solusdt",
-    "KRW-XRP": "xrpusdt",
-    "KRW-ADA": "adausdt",
-    
-    # --- 밈 코인 (변동성 최상) ---
     "KRW-DOGE": "dogeusdt",
-    "KRW-SHIB": "shibusdt",
-    "KRW-PEPE": "pepeusdt",
     
-    # --- 레이어1 / 플랫폼 (거래량 상위) ---
-    "KRW-AVAX": "avaxusdt",
-    "KRW-TRX": "trxusdt",
-    "KRW-DOT": "dotusdt",
-    "KRW-LINK": "linkusdt",
-    "KRW-ETC": "etcusdt",
-    "KRW-BCH": "bchusdt",
+    # --- 급등/급락 포착 (스캐너 포착 종목) ---
+    "KRW-AXS": "axsusdt",
+    "KRW-ADA": "adausdt",
+    "KRW-SXP": "sxpusdt",
     
-    # --- 메타버스 / 게이밍 / AI ---
-    "KRW-SAND": "sandusdt",
-    "KRW-MANA": "manausdt",
-    "KRW-NEAR": "nearusdt",
-    "KRW-STX": "stxusdt",     # 비트코인 생태계
-    "KRW-SUI": "suiusdt",     # 신규 메이저
-    "KRW-SEI": "seiusdt"
+    # 주의: 스캐너에 잡힌 'ENSO'가 'ENS(이더리움네임서비스)'라면 아래 주석 해제 사용
+    # "KRW-ENS": "ensusdt",
 }
 
 # [2. 전략 설정]
 RSI_PERIOD = 14
-RSI_BUY_THRESHOLD = 80      # (테스트용: 80, 실전 추천: 30)
-BB_MULTIPLIER = 2.0         
 
+# 🔥 [핵심 변경] 극단적 공포장(지수 9)이므로 기준을 30 -> 25로 낮춤
+# 개미들이 공포에 질려 던질 때만 줍습니다.
+RSI_BUY_THRESHOLD = 25      
+
+# 밴드폭을 2.0 -> 2.2로 넓혀서 휩소(속임수) 방지
+BB_MULTIPLIER = 2.2         
 
 # [추가됨] 틱 가치 필터 설정
-# 본전(BEP)까지 가는데 15틱 이상 올라야 한다면 진입 금지 (변동성 대비 효율 낮음)
+# 본전(BEP)까지 가는데 15틱 이상 올라야 한다면 진입 금지
 MAX_TICKS_FOR_BEP = 15
 
-
 # [3. 리스크 관리]
-MAX_KIMP_THRESHOLD = 10.0    # (테스트용: 10%, 실전 추천: 5%)
-REVERSE_KIMP_THRESHOLD = -1.0
-STOP_LOSS_PCT = -1.5        # -1.5% 손절
+# 김프가 +1.39%로 안정적이므로 5% 넘어가면 과열로 판단하고 매수 중단
+MAX_KIMP_THRESHOLD = 5.0    
+REVERSE_KIMP_THRESHOLD = -1.0 # 역프 -1.0% 도달 시 강력 매수
+
+STOP_LOSS_PCT = -1.5        # -1.5% 손절 (변동성 장세라 짧게)
 TAKE_PROFIT_PCT = 1.0       # 1.0% 익절
 
 # [4. 주문 및 API 설정]
-IS_SIMULATION = True  # True: 모의투자, False: 실전매매
+# ⚠️ 주의: 실전 매매를 원하시면 True를 False로 변경하세요!
+IS_SIMULATION = False  
 UPBIT_ACCESS_KEY = os.getenv("UPBIT_ACCESS_KEY", "")
 UPBIT_SECRET_KEY = os.getenv("UPBIT_SECRET_KEY", "")
-TRADE_AMOUNT = 6000
+TRADE_AMOUNT = 6000   # 1회 진입 금액 (원)
 
-
+# -----------------------------------------------------s
+# [5. 바이낸스 리더-팔로워 설정]
 # -----------------------------------------------------
-# [5. 바이낸스 리더-팔로워 설정 (신규 추가)]
-# -----------------------------------------------------
-# 바이낸스 BTC가 "1초(또는 직전 틱)" 만에 이만큼 오르면 급등으로 판단
-BINANCE_SURGE_THRESHOLD = 0.3 # 단위: % (0.3% 급등은 초단기적으로 매우 큰 수치임)
+# 공포장에서는 급등이 짧게 끝날 수 있으므로 기준 유지 (0.3%)
+BINANCE_SURGE_THRESHOLD = 0.3 
 
-# BTC 급등 시 업비트에서 따라서 살 "추종자(Follower)" 코인들
-# (베타 계수가 높고 반응 속도가 빠른 메이저 알트 추천)
-FOLLOWER_COINS = ["KRW-SOL", "KRW-XRP", "KRW-DOGE", "KRW-ETH"]
+# BTC가 튀면 따라갈 녀석들 (오늘 거래량 터진 놈들 순서)
+FOLLOWER_COINS = ["KRW-XRP", "KRW-SOL", "KRW-ETH", "KRW-DOGE"]
