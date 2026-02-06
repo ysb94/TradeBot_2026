@@ -4,16 +4,7 @@
 import pyupbit
 from strategy.indicators import TechnicalAnalyzer
 from strategy.calculator import TickCalculator
-from config import (
-    RSI_BUY_THRESHOLD,
-    MAX_KIMP_THRESHOLD,
-    MAX_TICKS_FOR_BEP,
-    REVERSE_KIMP_THRESHOLD,
-    VWAP_BUY_FACTOR,
-    RSI_REVERSE_OFFSET,
-    OHLCV_INTERVAL,
-    OHLCV_COUNT,
-)
+import config
 
 class SignalMaker:
     def __init__(self):
@@ -26,7 +17,7 @@ class SignalMaker:
         (보유 중인 코인의 매도 판단용)
         """
         try:
-            df = pyupbit.get_ohlcv(ticker, interval=OHLCV_INTERVAL, count=OHLCV_COUNT)
+            df = pyupbit.get_ohlcv(ticker, interval=config.OHLCV_INTERVAL, count=config.OHLCV_COUNT)
             if df is None: return None
             
             # 지표 계산
@@ -40,17 +31,17 @@ class SignalMaker:
         매수 신호 점검 (RSI 골든크로스 + 볼밴 + VWAP + 김프)
         """
         # 1. 김프 필터
-        if current_kimp > MAX_KIMP_THRESHOLD:
+        if current_kimp > config.MAX_KIMP_THRESHOLD:
             return False, f"김프 과열({current_kimp:.2f}%)"
 
         # 2. 틱 효율성(BEP) 체크
         ticks_to_bep, _ = self.calculator.get_ticks_to_bep(current_price)
-        if ticks_to_bep > MAX_TICKS_FOR_BEP:
+        if ticks_to_bep > config.MAX_TICKS_FOR_BEP:
             return False, f"틱 효율 나쁨(본전까지 {ticks_to_bep}틱 필요)"
 
         # 3. 데이터 수집
         try:
-            df = pyupbit.get_ohlcv(ticker, interval=OHLCV_INTERVAL, count=OHLCV_COUNT)
+            df = pyupbit.get_ohlcv(ticker, interval=config.OHLCV_INTERVAL, count=config.OHLCV_COUNT)
             if df is None: return False, "데이터 없음"
         except: return False, "API 오류"
 
@@ -62,15 +53,15 @@ class SignalMaker:
         vwap = analysis['VWAP']
 
         # [3순위] 역프리미엄 스나이퍼
-        if current_kimp <= REVERSE_KIMP_THRESHOLD:
-            if rsi_14 < (RSI_BUY_THRESHOLD + RSI_REVERSE_OFFSET):
+        if current_kimp <= config.REVERSE_KIMP_THRESHOLD:
+            if rsi_14 < (config.RSI_BUY_THRESHOLD + config.RSI_REVERSE_OFFSET):
                 return True, f"🔥 역프 스나이퍼 (김프:{current_kimp:.2f}%, RSI:{rsi_14})"
 
         # 🎯 [핵심] 정밀 매수 전략
         is_rsi_golden_cross = rsi_9 > rsi_14
-        is_vwap_support = current_price >= (vwap * VWAP_BUY_FACTOR)
+        is_vwap_support = current_price >= (vwap * config.VWAP_BUY_FACTOR)
 
-        if rsi_14 < RSI_BUY_THRESHOLD and is_bb_touch:
+        if rsi_14 < config.RSI_BUY_THRESHOLD and is_bb_touch:
             if is_rsi_golden_cross:
                 if is_vwap_support:
                     return True, f"⚡ 골든크로스+VWAP지지 (RSI9:{rsi_9}>14:{rsi_14})"

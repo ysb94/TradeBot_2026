@@ -3,24 +3,17 @@
 
 import pyupbit
 import time
-from config import (
-    UPBIT_ACCESS_KEY,
-    UPBIT_SECRET_KEY,
-    IS_SIMULATION,
-    OB_DEPTH_COUNT,
-    OB_BAD_RATIO,
-    OB_GOOD_RATIO,
-)
+import config
 
 class OrderManager:
     def __init__(self):
-        self.is_simulation = IS_SIMULATION
+        self.is_simulation = config.IS_SIMULATION
         self.upbit = None
         self.sim_holdings = {} 
         self.sim_krw = 10_000_000 
         
         if not self.is_simulation:
-            self.upbit = pyupbit.Upbit(UPBIT_ACCESS_KEY, UPBIT_SECRET_KEY)
+            self.upbit = pyupbit.Upbit(config.UPBIT_ACCESS_KEY, config.UPBIT_SECRET_KEY)
             print("💳 [OrderManager] 실전 매매 모드 (호가창 분석 시스템 가동)")
         else:
             print("🧪 [OrderManager] 모의 투자 모드")
@@ -38,14 +31,14 @@ class OrderManager:
             units = orderbook['orderbook_units']
 
             # N호가까지의 잔량 합계 계산
-            depth = units[:OB_DEPTH_COUNT]
+            depth = units[:config.OB_DEPTH_COUNT]
             ask_size = sum([u['ask_size'] for u in depth])  # 매도 잔량 (저항)
             bid_size = sum([u['bid_size'] for u in depth])  # 매수 잔량 (지지)
 
             # 비율 분석
-            if ask_size > bid_size * OB_BAD_RATIO:
+            if ask_size > bid_size * config.OB_BAD_RATIO:
                 return "BAD"
-            elif bid_size > ask_size * OB_GOOD_RATIO:
+            elif bid_size > ask_size * config.OB_GOOD_RATIO:
                 return "GOOD"
             
             return "NORMAL"

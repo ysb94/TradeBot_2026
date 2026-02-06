@@ -6,15 +6,15 @@ import json
 import time
 import websockets
 from collections import deque # [추가] 과거 데이터 저장용
-from config import CURRENT_EXCHANGE_RATE, TARGET_COINS, BINANCE_SURGE_THRESHOLD
+import config
 
 class DataAggregator:
     def __init__(self):
         self.market_data = {
-            ticker: {"upbit": None, "binance": None, "kimp": None} 
-            for ticker in TARGET_COINS.keys()
+            ticker: {"upbit": None, "binance": None, "kimp": None}
+            for ticker in config.TARGET_COINS.keys()
         }
-        self.binance_map = {v: k for k, v in TARGET_COINS.items()}
+        self.binance_map = {v: k for k, v in config.TARGET_COINS.items()}
 
         # [리더-팔로워용] BTC 가격 기록 (시간, 가격)
         self.btc_history = deque(maxlen=20) 
@@ -24,7 +24,7 @@ class DataAggregator:
     async def connect_upbit(self):
         """업비트: 여러 종목 한 번에 구독"""
         uri = "wss://api.upbit.com/websocket/v1"
-        target_codes = list(TARGET_COINS.keys())
+        target_codes = list(config.TARGET_COINS.keys())
 
         while True:
             try:
@@ -51,7 +51,7 @@ class DataAggregator:
 
     async def connect_binance(self):
         """바이낸스: 리더(BTC) 감시 및 급등 포착"""
-        streams = "/".join([f"{sym}@ticker" for sym in TARGET_COINS.values()])
+        streams = "/".join([f"{sym}@ticker" for sym in config.TARGET_COINS.values()])
         uri = f"wss://stream.binance.com:9443/stream?streams={streams}"
         
         while True:
@@ -102,7 +102,7 @@ class DataAggregator:
             change_rate = ((current_price - prev_price) / prev_price) * 100
             
             # 급등 기준 초과 시 신호 발생
-            if change_rate >= BINANCE_SURGE_THRESHOLD:
+            if change_rate >= config.BINANCE_SURGE_THRESHOLD:
                 self.surge_detected = True
                 self.surge_info = f"🚀 [LEADER] BTC 급등 감지! (+{change_rate:.2f}% in 1s)"
 
@@ -110,7 +110,7 @@ class DataAggregator:
         u_price = self.market_data[code]['upbit']
         b_price = self.market_data[code]['binance']
         if u_price and b_price:
-            b_krw = b_price * CURRENT_EXCHANGE_RATE
+            b_krw = b_price * config.CURRENT_EXCHANGE_RATE
             self.market_data[code]['kimp'] = ((u_price - b_krw) / b_krw) * 100
 
     async def run(self):

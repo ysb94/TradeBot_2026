@@ -3,7 +3,7 @@
 
 import pandas as pd
 import numpy as np
-from config import RSI_LONG_PERIOD, RSI_SHORT_PERIOD, BB_PERIOD, BB_STD_DEV
+import config
 
 
 class TechnicalAnalyzer:
@@ -13,7 +13,7 @@ class TechnicalAnalyzer:
     def calculate_rsi(self, df, period=None):
         """RSI(상대강도지수) 계산"""
         if period is None:
-            period = RSI_LONG_PERIOD
+            period = config.RSI_LONG_PERIOD
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
@@ -24,9 +24,9 @@ class TechnicalAnalyzer:
     def calculate_bollinger_bands(self, df, period=None, std_dev=None):
         """볼린저 밴드 계산 (상단, 중단, 하단)"""
         if period is None:
-            period = BB_PERIOD
+            period = config.BB_PERIOD
         if std_dev is None:
-            std_dev = BB_STD_DEV
+            std_dev = config.BB_STD_DEV
         sma = df['close'].rolling(window=period).mean() # 중단
         std = df['close'].rolling(window=period).std()  # 표준편차
 
@@ -49,9 +49,9 @@ class TechnicalAnalyzer:
         df = ohlcv_data.copy()
         
         # 1. 지표 계산
-        df['RSI_14'] = self.calculate_rsi(df, RSI_LONG_PERIOD)  # 장기 추세
-        df['RSI_9'] = self.calculate_rsi(df, RSI_SHORT_PERIOD)  # 단기 민감도 (골든크로스용)
-        df['BB_Upper'], df['BB_Mid'], df['BB_Lower'] = self.calculate_bollinger_bands(df, BB_PERIOD, BB_STD_DEV)
+        df['RSI_14'] = self.calculate_rsi(df, config.RSI_LONG_PERIOD)  # 장기 추세
+        df['RSI_9'] = self.calculate_rsi(df, config.RSI_SHORT_PERIOD)  # 단기 민감도 (골든크로스용)
+        df['BB_Upper'], df['BB_Mid'], df['BB_Lower'] = self.calculate_bollinger_bands(df, config.BB_PERIOD, config.BB_STD_DEV)
         df['VWAP'] = self.calculate_vwap(df)      # 세력 평단가 (눌림목용)
         
         # 2. 최신 데이터 추출

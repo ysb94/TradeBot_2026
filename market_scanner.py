@@ -1,175 +1,185 @@
+# main.py
+# [최종] 자동 튜닝(Self-Optimizing) 엔진 탑재
+
+import asyncio
 import time
-import requests
-import pyupbit
-import pandas as pd
-from datetime import datetime
+import config  # [중요] 설정을 동적으로 바꾸기 위해 모듈 전체를 import
+from data_feed.aggregator import DataAggregator
+from strategy.signal_maker import SignalMaker
+from execution.order_manager import OrderManager
+from execution.risk_manager import RiskManager
+from data_feed.macro_client import MacroClient
+from market_scanner import get_strategy_recommendation  # [신규] 분석기 호출
 
-# ---------------------------------------------------------
-# [설정] 분석 대상 및 API 주소
-# ---------------------------------------------------------
-# 환율 정보 (무료 API)
-EXCHANGE_RATE_API = "https://api.exchangerate-api.com/v4/latest/USD"
-# 공포/탐욕 지수 (무료 API)
-FEAR_GREED_API = "https://api.alternative.me/fng/"
-# 분석할 코인 개수 (거래대금 상위 N개)
-TOP_COIN_COUNT = 10 
-
-def get_exchange_rate():
-    """실시간 원/달러 환율 조회"""
-    try:
-        resp = requests.get(EXCHANGE_RATE_API, timeout=5).json()
-        return float(resp['rates']['KRW'])
-    except Exception as e:
-        print(f"⚠️ 환율 조회 실패 (기본값 1450원 사용): {e}")
-        return 1450.0
-
-def get_fear_and_greed():
-    """공포/탐욕 지수 조회"""
-    try:
-        resp = requests.get(FEAR_GREED_API, timeout=5).json()
-        data = resp['data'][0]
-        return int(data['value']), data['value_classification']
-    except:
-        return 50, "Neutral"
-
-def analyze_market_conditions():
-    print(f"\n🔍 [시장 정밀 진단 시작] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("-" * 50)
-
-    # 1. 기초 데이터 수집
-    usd_krw = get_exchange_rate()
-    fng_value, fng_label = get_fear_and_greed()
-    
-    print(f"💵 실시간 환율: {usd_krw:.2f} 원/$")
-    print(f"😨 공포/탐욕 지수: {fng_value} ({fng_label})")
-
-    # 2. 업비트 전 종목 스캔 (거래대금 상위 추출)
-    print("⏳ 업비트 상장 코인 스캔 중...")
-    tickers = pyupbit.get_tickers(fiat="KRW")
-    
-    # API 요청 제한을 피하기 위해 100개씩 나누어 조회하거나, 전체 Ticker 조회 (업비트 API는 빠름)
-    # 한 번에 요청 (url 길이 제한 주의, 나눠서 요청)
-    url = "https://api.upbit.com/v1/ticker"
-    markets = ",".join(tickers)
-    
-    # 너무 길면 에러나므로 30개씩 분할 요청
-    chunk_size = 30
-    ticker_data = []
-    
-    for i in range(0, len(tickers), chunk_size):
-        chunk = tickers[i:i+chunk_size]
-        params = {"markets": ",".join(chunk)}
+async def auto_tuner_loop():
+    """
+    [AI 자동 튜닝 스케줄러]
+    4시간마다 시장을 분석하여 config 설정을 실시간으로 수정합니다.
+    """
+    while True:
+        # 봇 시작 직후엔 바로 실행하지 않고, 4시간(14400초) 대기 후 첫 실행
+        # (원한다면 테스트를 위해 60초 등으로 줄여볼 수 있음)
+        await asyncio.sleep(14400) 
+        
+        print(f"\n🧠 [Auto Tuner] 시장 분석 및 설정 최적화 시작... ({time.strftime('%H:%M')})")
+        
         try:
-            res = requests.get(url, params=params).json()
-            ticker_data.extend(res)
-            time.sleep(0.1)
-        except:
-            pass
-
-    # DataFrame 변환 및 정렬
-    df = pd.DataFrame(ticker_data)
-    df['acc_trade_price_24h'] = df['acc_trade_price_24h'].astype(float)
-    df = df.sort_values(by='acc_trade_price_24h', ascending=False)
-    
-    # 거래대금 상위 코인 추출
-    top_coins = df.head(TOP_COIN_COUNT)[['market', 'trade_price', 'acc_trade_price_24h', 'signed_change_rate']]
-    
-    print(f"\n🏆 [오늘의 주도주 TOP {TOP_COIN_COUNT}]")
-    target_coins_map = {}
-    
-    # 바이낸스 심볼 매핑용 (간이 로직: KRW-BTC -> btcusdt)
-    for idx, row in top_coins.iterrows():
-        ticker = row['market']
-        symbol = ticker.split('-')[1].lower() + "usdt"
-        
-        # 제외할 코인 (스테이블 코인 등)
-        if symbol in ['usdtusdt']: continue
+            # 1. 시장 분석 수행 (비용 0원)
+            new_settings = get_strategy_recommendation()
             
-        print(f"   {idx+1}. {ticker:<9} | 등락률: {row['signed_change_rate']*100:>6.2f}% | 거래대금: {row['acc_trade_price_24h']/100000000:,.0f}억")
-        target_coins_map[ticker] = symbol
+            # 2. 설정값 유효성 검사 (안전장치)
+            # AI가 터무니없는 값을 주면 무시하도록 범위 제한
+            if not (10 <= new_settings['RSI_BUY_THRESHOLD'] <= 50):
+                print(f"⚠️ [Tuner] RSI 추천값 이상({new_settings['RSI_BUY_THRESHOLD']}) -> 변경 취소")
+                continue
 
-    # 3. 김치 프리미엄 계산 (대장주 BTC 기준)
-    print("\n🍔 [김치 프리미엄 분석]")
+            # 3. 메모리 상의 설정값 즉시 교체 (봇 재시작 불필요!)
+            old_rsi = config.RSI_BUY_THRESHOLD
+            
+            config.TARGET_COINS = new_settings['TARGET_COINS']
+            config.FOLLOWER_COINS = new_settings['FOLLOWER_COINS']
+            config.RSI_BUY_THRESHOLD = new_settings['RSI_BUY_THRESHOLD']
+            config.BB_MULTIPLIER = new_settings['BB_MULTIPLIER']
+            config.MAX_KIMP_THRESHOLD = new_settings['MAX_KIMP_THRESHOLD']
+            config.REVERSE_KIMP_THRESHOLD = new_settings['REVERSE_KIMP_THRESHOLD']
+            config.CURRENT_EXCHANGE_RATE = new_settings['CURRENT_EXCHANGE_RATE']
+            
+            print(f"✅ [Tuner] 업데이트 완료!")
+            print(f"   - 주도주: {len(config.TARGET_COINS)}개 로테이션")
+            print(f"   - RSI 기준: {old_rsi} -> {config.RSI_BUY_THRESHOLD}")
+            print(f"   - 김프 제한: {config.MAX_KIMP_THRESHOLD}%")
+            
+        except Exception as e:
+            print(f"⚠️ [Tuner] 최적화 실패: {e}")
+
+async def main():
+    print(f"========================================")
+    print(f"   🐙 2026 Octopus Bot - AI Auto Pilot")
+    print(f"   Mode: {'🧪 Simulation' if config.IS_SIMULATION else '💳 Real Trading'}")
+    print(f"========================================")
     
-    upbit_btc = float(df[df['market']=='KRW-BTC']['trade_price'].iloc[0])
+    # 객체 생성
+    aggregator = DataAggregator()
+    signal_maker = SignalMaker()
+    order_manager = OrderManager()
+    risk_manager = RiskManager()
+    macro_client = MacroClient()
+
+    # [신규] 백그라운드에서 자동 튜닝 스케줄러 실행
+    asyncio.create_task(auto_tuner_loop())
     
-    try:
-        binance_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5).json()
-        binance_btc = float(binance_res['price'])
-        
-        # 김프 계산
-        global_krw = binance_btc * usd_krw
-        kimp_pct = ((upbit_btc - global_krw) / global_krw) * 100
-        
-        print(f"   - 업비트 BTC: {upbit_btc:,.0f} 원")
-        print(f"   - 바이낸스 BTC: ${binance_btc:,.2f} (환산: {global_krw:,.0f} 원)")
-        print(f"   - 현재 김프: {kimp_pct:+.2f}%")
-        
-    except Exception as e:
-        print(f"⚠️ 바이낸스 조회 실패: {e}")
-        kimp_pct = 0.0
+    # 데이터 수집 시작
+    asyncio.create_task(aggregator.run())
+    print("⏳ 데이터 동기화 중... (3초)")
+    await asyncio.sleep(3)
 
-    # ---------------------------------------------------------
-    # 🤖 추천 설정값 생성 로직
-    # ---------------------------------------------------------
-    rec_rsi = 30
-    rec_bb_mult = 2.0
-    rec_kimp_max = 5.0
-    rec_reverse_kimp = -1.0
-    
-    # 1. 공포지수에 따른 RSI 조정
-    if fng_value <= 20: # 극단적 공포
-        rec_rsi = 25 # 더 보수적으로 (더 떨어져야 산다)
-        rec_bb_mult = 2.2 # 밴드폭 넓힘
-        market_mood = "🥶 극단적 공포 (보수적 진입 추천)"
-    elif fng_value >= 75: # 극단적 탐욕
-        rec_rsi = 40 # 기회를 놓치지 않게 완화
-        market_mood = "🔥 극단적 탐욕 (공격적 진입 가능)"
-    else:
-        market_mood = "😐 중립/일반장"
+    while True:
+        try:
+            # ---------------------------------------------------------
+            # 🛑 [0] 거시경제 필터 (Macro Filter)
+            # ---------------------------------------------------------
+            if config.ENABLE_MACRO_FILTER:
+                is_risk, reason = macro_client.is_volatility_risk()
+                if is_risk:
+                    print(f"\n🚫 [MACRO] 매매 일시 정지: {reason}")
+                    print(f"   (변동성 완화 대기 중... 1분 Sleep)")
+                    await asyncio.sleep(60)
+                    continue 
 
-    # 2. 김프에 따른 필터 조정
-    if kimp_pct < 0: # 역프 상태
-        rec_reverse_kimp = kimp_pct - 0.5 # 현재 역프보다 조금 더 아래
-        rec_kimp_max = 3.0 # 김프가 다시 끼기 시작하면 3%만 되도 튄다
-        kimp_status = "📉 역프리미엄 (줍줍 찬스!)"
-    elif kimp_pct > 5.0: # 고김프
-        rec_kimp_max = kimp_pct + 2.0 # 현재보다 2% 더 여유
-        kimp_status = "🚨 고김프 주의 (추격 매수 조심)"
-    else:
-        rec_kimp_max = 5.0
-        kimp_status = "✅ 안정적"
+            print("\r", end="", flush=True) 
 
-    # ---------------------------------------------------------
-    # 📝 config.py 코드 생성
-    # ---------------------------------------------------------
-    print("\n" + "="*50)
-    print("      📋 config.py 추천 설정값 (복사해서 사용)")
-    print("="*50)
-    
-    config_code = f"""
-# [1. 자동 생성된 설정 - {datetime.now().strftime('%Y-%m-%d')}]
-# 시장 분위기: {market_mood}
-# 김프 상태: {kimp_status} ({kimp_pct:+.2f}%)
+            # 0. 자산 조회
+            current_prices = {t: d['upbit'] for t, d in aggregator.market_data.items() if d['upbit']}
+            total_assets = order_manager.get_total_assets(current_prices)
+            print(f"💰 {total_assets:,.0f}원 | ", end="", flush=True)
 
-CURRENT_EXCHANGE_RATE = {usd_krw} 
+            # ---------------------------------------------------------
+            # 🔥 [1] 긴급 매수 (변수명 앞에 config. 붙여야 함)
+            # ---------------------------------------------------------
+            if aggregator.surge_detected:
+                print(f"\n\n{aggregator.surge_info}")
+                for coin in config.FOLLOWER_COINS: # config.FOLLOWER_COINS 사용
+                    if risk_manager.is_in_cooldown(coin): continue
+                    if order_manager.get_balance(coin) > 0: continue
+                    
+                    price = aggregator.market_data[coin]['upbit']
+                    if price and order_manager.buy_limit_safe(coin, config.TRADE_AMOUNT):
+                        order_manager.simulation_buy(coin, config.TRADE_AMOUNT, price)
+                        risk_manager.register_buy(coin)
+                
+                aggregator.surge_detected = False
+                print("✅ 긴급 매수 완료. 3초 대기...\n")
+                await asyncio.sleep(3)
+                continue
 
-# [주도주 TOP {len(target_coins_map)} 자동 반영]
-TARGET_COINS = {str(target_coins_map)}
+            # ---------------------------------------------------------
+            # 🎯 [2] 일반 매매 (config.TARGET_COINS 사용)
+            # ---------------------------------------------------------
+            # 딕셔너리가 실행 중에 바뀔 수 있으므로 list()로 복사해서 순회
+            for ticker in list(config.TARGET_COINS.keys()):
+                
+                # 데이터가 아직 없으면 스킵
+                if ticker not in aggregator.market_data: continue
+                
+                data = aggregator.market_data[ticker]
+                price = data['upbit']
+                kimp = data['kimp']
 
-# [전략 설정]
-RSI_BUY_THRESHOLD = {rec_rsi}      # 공포지수 {fng_value} 반영
-BB_MULTIPLIER = {rec_bb_mult}         
+                if price is None or kimp is None: continue
 
-# [리스크 관리]
-MAX_KIMP_THRESHOLD = {rec_kimp_max:.1f}   
-REVERSE_KIMP_THRESHOLD = {rec_reverse_kimp:.1f} 
+                balance = order_manager.get_balance(ticker)
+                # 최소 주문 금액(5000원) 이상 있어야 보유 중으로 판단
+                has_coin = balance > 0 and (balance * price) >= config.MIN_ORDER_VALUE
 
-# [추천 팔로워 코인 (거래대금 최상위 제외한 2~5위)]
-FOLLOWER_COINS = {list(target_coins_map.keys())[1:5]}
-"""
-    print(config_code)
-    print("="*50)
+                # [A] 매도 관리
+                if has_coin:
+                    avg_price = order_manager.get_avg_buy_price(ticker)
+                    analysis = signal_maker.get_analysis_only(ticker)
+                    action, msg = risk_manager.check_exit_signal(ticker, price, avg_price, analysis)
+                    
+                    if action != "HOLD":
+                        print(f"\n{msg}")
+                        ob_health = order_manager.analyze_orderbook_health(ticker)
+                        sell_strategy = "LIMIT"
+                        
+                        if ob_health == "BAD" or "손절" in msg:
+                            sell_strategy = "MARKET"
+                            print(f"   ⚠️ 급한 매도 (호가창 나쁨 or 손절) -> 시장가 실행")
+
+                        if action == "SELL_ALL":
+                            if order_manager.sell_percentage(ticker, 1.0, sell_strategy):
+                                order_manager.simulation_sell(ticker, price)
+                        elif action == "SELL_HALF":
+                            order_manager.sell_percentage(ticker, config.PARTIAL_SELL_RATIO, sell_strategy)
+                    else:
+                        print(f"[{ticker.split('-')[1]} {msg}] ", end="", flush=True)
+
+                # [B] 매수 관리
+                else:
+                    if risk_manager.is_in_cooldown(ticker): continue
+
+                    is_buy, reason = signal_maker.check_buy_signal(ticker, price, kimp)
+                    if is_buy:
+                        print(f"\n🔥 {ticker} 진입! ({reason})")
+                        if order_manager.get_balance("KRW") >= config.TRADE_AMOUNT:
+                            if order_manager.buy_limit_safe(ticker, config.TRADE_AMOUNT):
+                                order_manager.simulation_buy(ticker, config.TRADE_AMOUNT, price)
+                                risk_manager.register_buy(ticker)
+                                await asyncio.sleep(1)
+                    else:
+                        icon = "🟢" if is_buy else "⚪"
+                        print(f"[{ticker.split('-')[1]} {icon}] ", end="", flush=True)
+
+            await asyncio.sleep(config.LOOP_DELAY)
+
+        except Exception as e:
+            print(f"\n⚠️ Error: {e}")
+            await asyncio.sleep(1)
 
 if __name__ == "__main__":
-    analyze_market_conditions()
+    try:
+        # 윈도우 환경설정 (필요시)
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n🛑 봇 종료")
