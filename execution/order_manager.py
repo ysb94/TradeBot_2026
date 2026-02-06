@@ -3,7 +3,14 @@
 
 import pyupbit
 import time
-from config import UPBIT_ACCESS_KEY, UPBIT_SECRET_KEY, IS_SIMULATION
+from config import (
+    UPBIT_ACCESS_KEY,
+    UPBIT_SECRET_KEY,
+    IS_SIMULATION,
+    OB_DEPTH_COUNT,
+    OB_BAD_RATIO,
+    OB_GOOD_RATIO,
+)
 
 class OrderManager:
     def __init__(self):
@@ -29,16 +36,17 @@ class OrderManager:
             if not orderbook: return "NORMAL"
 
             units = orderbook['orderbook_units']
-            
-            # 5호가까지의 잔량 합계 계산
-            ask_size = sum([u['ask_size'] for u in units[:5]]) # 매도 잔량 (저항)
-            bid_size = sum([u['bid_size'] for u in units[:5]]) # 매수 잔량 (지지)
-            
+
+            # N호가까지의 잔량 합계 계산
+            depth = units[:OB_DEPTH_COUNT]
+            ask_size = sum([u['ask_size'] for u in depth])  # 매도 잔량 (저항)
+            bid_size = sum([u['bid_size'] for u in depth])  # 매수 잔량 (지지)
+
             # 비율 분석
-            if ask_size > bid_size * 3:
-                return "BAD" # 매도벽이 3배 이상 두꺼움 (뚫기 힘듦 -> 시장가 던져야 할 수도)
-            elif bid_size > ask_size * 2:
-                return "GOOD" # 매수벽이 튼튼함 (지정가로 버텨볼 만함)
+            if ask_size > bid_size * OB_BAD_RATIO:
+                return "BAD"
+            elif bid_size > ask_size * OB_GOOD_RATIO:
+                return "GOOD"
             
             return "NORMAL"
         except:

@@ -4,7 +4,16 @@
 import pyupbit
 from strategy.indicators import TechnicalAnalyzer
 from strategy.calculator import TickCalculator
-from config import RSI_BUY_THRESHOLD, MAX_KIMP_THRESHOLD, MAX_TICKS_FOR_BEP, REVERSE_KIMP_THRESHOLD
+from config import (
+    RSI_BUY_THRESHOLD,
+    MAX_KIMP_THRESHOLD,
+    MAX_TICKS_FOR_BEP,
+    REVERSE_KIMP_THRESHOLD,
+    VWAP_BUY_FACTOR,
+    RSI_REVERSE_OFFSET,
+    OHLCV_INTERVAL,
+    OHLCV_COUNT,
+)
 
 class SignalMaker:
     def __init__(self):
@@ -17,7 +26,7 @@ class SignalMaker:
         (보유 중인 코인의 매도 판단용)
         """
         try:
-            df = pyupbit.get_ohlcv(ticker, interval="minute1", count=200)
+            df = pyupbit.get_ohlcv(ticker, interval=OHLCV_INTERVAL, count=OHLCV_COUNT)
             if df is None: return None
             
             # 지표 계산
@@ -41,7 +50,7 @@ class SignalMaker:
 
         # 3. 데이터 수집
         try:
-            df = pyupbit.get_ohlcv(ticker, interval="minute1", count=200)
+            df = pyupbit.get_ohlcv(ticker, interval=OHLCV_INTERVAL, count=OHLCV_COUNT)
             if df is None: return False, "데이터 없음"
         except: return False, "API 오류"
 
@@ -54,12 +63,12 @@ class SignalMaker:
 
         # [3순위] 역프리미엄 스나이퍼
         if current_kimp <= REVERSE_KIMP_THRESHOLD:
-            if rsi_14 < (RSI_BUY_THRESHOLD + 10):
+            if rsi_14 < (RSI_BUY_THRESHOLD + RSI_REVERSE_OFFSET):
                 return True, f"🔥 역프 스나이퍼 (김프:{current_kimp:.2f}%, RSI:{rsi_14})"
 
         # 🎯 [핵심] 정밀 매수 전략
         is_rsi_golden_cross = rsi_9 > rsi_14
-        is_vwap_support = current_price >= (vwap * 0.995)
+        is_vwap_support = current_price >= (vwap * VWAP_BUY_FACTOR)
 
         if rsi_14 < RSI_BUY_THRESHOLD and is_bb_touch:
             if is_rsi_golden_cross:

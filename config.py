@@ -1,78 +1,102 @@
 import os
-
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except Exception:
     pass
 
-# [1. 기본 설정]
-# 2026-02-06 시장 진단: 환율 1,465원 반영
-CURRENT_EXCHANGE_RATE = 1465.09 
+# =========================================================
+# [1. 시스템 및 API 설정]
+# =========================================================
+IS_SIMULATION = False  # 실전 여부
+UPBIT_ACCESS_KEY = os.getenv("UPBIT_ACCESS_KEY", "")
+UPBIT_SECRET_KEY = os.getenv("UPBIT_SECRET_KEY", "")
 
-# 🐙 [다중 종목 감시 설정 - 거래대금 상위 주도주 위주]
-# 업비트 티커 : 바이낸스 웹소켓 심볼 (소문자 필수)
+# 루프 딜레이 및 데이터 설정
+LOOP_DELAY = 1              # 메인 루프 대기 시간 (초)
+OHLCV_INTERVAL = "minute1"  # 캔들 조회 기준
+OHLCV_COUNT = 200           # 캔들 조회 개수
+MIN_ORDER_VALUE = 5005       # 최소 주문 가능 금액 (업비트 5000원 + 여유분)
+
+# =========================================================
+# [2. 타겟 및 자산 설정]
+# =========================================================
+CURRENT_EXCHANGE_RATE = 1465.09
+TRADE_AMOUNT = 6000  # 1회 진입 금액
+
 TARGET_COINS = {
-    # --- 오늘의 대장주 (Top Priority) ---
-    "KRW-XRP": "xrpusdt",   # 거래대금 1위 (2.2조)
+    "KRW-XRP": "xrpusdt",
     "KRW-BTC": "btcusdt",
     "KRW-ETH": "ethusdt",
-    
-    # --- 변동성 상위 / 밈 코인 ---
     "KRW-SOL": "solusdt",
     "KRW-DOGE": "dogeusdt",
-    
-    # --- 급등/급락 포착 (스캐너 포착 종목) ---
     "KRW-AXS": "axsusdt",
     "KRW-ADA": "adausdt",
     "KRW-SXP": "sxpusdt",
-    
-    # 주의: 스캐너에 잡힌 'ENSO'가 'ENS(이더리움네임서비스)'라면 아래 주석 해제 사용
-    # "KRW-ENS": "ensusdt",
 }
-
-# [2. 전략 설정]
-RSI_PERIOD = 14
-
-# 🔥 [핵심 변경] 극단적 공포장(지수 9)이므로 기준을 30 -> 25로 낮춤
-# 개미들이 공포에 질려 던질 때만 줍습니다.
-RSI_BUY_THRESHOLD = 25      
-
-# 밴드폭을 2.0 -> 2.2로 넓혀서 휩소(속임수) 방지
-BB_MULTIPLIER = 2.2         
-
-# [추가됨] 틱 가치 필터 설정
-# 본전(BEP)까지 가는데 15틱 이상 올라야 한다면 진입 금지
-MAX_TICKS_FOR_BEP = 15
-
-# [3. 리스크 관리]
-# 김프가 +1.39%로 안정적이므로 5% 넘어가면 과열로 판단하고 매수 중단
-MAX_KIMP_THRESHOLD = 5.0    
-REVERSE_KIMP_THRESHOLD = -1.0 # 역프 -1.0% 도달 시 강력 매수
-
-
-# [4. 주문 및 API 설정]
-# ⚠️ 주의: 실전 매매를 원하시면 True를 False로 변경하세요!
-IS_SIMULATION = False  
-UPBIT_ACCESS_KEY = os.getenv("UPBIT_ACCESS_KEY", "")
-UPBIT_SECRET_KEY = os.getenv("UPBIT_SECRET_KEY", "")
-TRADE_AMOUNT = 6000   # 1회 진입 금액 (원)
-
-# -----------------------------------------------------s
-# [5. 바이낸스 리더-팔로워 설정]
-# -----------------------------------------------------
-# 공포장에서는 급등이 짧게 끝날 수 있으므로 기준 유지 (0.3%)
-BINANCE_SURGE_THRESHOLD = 0.3 
-
-# BTC가 튀면 따라갈 녀석들 (오늘 거래량 터진 놈들 순서)
 FOLLOWER_COINS = ["KRW-XRP", "KRW-SOL", "KRW-ETH", "KRW-DOGE"]
 
+# =========================================================
+# [3. 지표 파라미터 (Indicators)]
+# =========================================================
+RSI_LONG_PERIOD = 14     # RSI 장기 (추세용)
+RSI_SHORT_PERIOD = 9     # RSI 단기 (골든크로스용)
+BB_PERIOD = 20           # 볼린저밴드 기간
+BB_STD_DEV = 2           # 볼린저밴드 승수 (표준편차)
 
-# [리스크 관리]
-STOP_LOSS_PCT = -1.5        # 손절 기준
-TAKE_PROFIT_PCT = 1.0       # (사용 안 함, 트레일링 스탑으로 대체됨)
+# =========================================================
+# [4. 매수 전략 (Entry Strategy)]
+# =========================================================
+RSI_BUY_THRESHOLD = 25       # 매수 기준 RSI
+BB_MULTIPLIER = 2.2          # (market_scanner 추천값 등)
+MAX_TICKS_FOR_BEP = 15       # BEP 틱 제한
+MAX_KIMP_THRESHOLD = 5.0     # 김프 제한
+REVERSE_KIMP_THRESHOLD = -1.0 # 역프 기준
 
-# [트레일링 스탑 설정]
-# 0.5% 수익 나기 시작하면 감시 -> 고점 대비 0.3% 하락 시 매도
-TRAILING_START = 0.5  
-TRAILING_DROP = 0.3
+# 정밀 진입 조건
+VWAP_BUY_FACTOR = 0.995      # VWAP * 0.995 이상일 때 지지로 판단
+RSI_REVERSE_OFFSET = 10       # 역프일 때 RSI 완화 수치 (+10)
+
+# =========================================================
+# [5. 매도 및 리스크 관리 (Exit & Risk)]
+# =========================================================
+STOP_LOSS_PCT = -1.5         # 가격 손절 (%)
+TRAILING_START = 0.5         # 트레일링 시작 (%)
+TRAILING_DROP = 0.3          # 트레일링 낙폭 (%)
+
+# 지표 손절 기준
+VWAP_STOP_FACTOR = 0.99      # VWAP * 0.99 밑으로 깨지면 손절
+RSI_PANIC_SELL = 25          # RSI가 이 값 밑으로 급락하면 투매로 간주
+
+# 시간 손절 (Time Cut)
+TIME_CUT_SECONDS = 180       # 진입 후 N초 경과 시 검사
+TIME_CUT_MIN_PROFIT = 0.2    # N초 지났는데 수익이 이 값(%) 미만이면 종료
+
+# 쿨타임 (재진입 금지 시간, 초)
+COOLDOWN_STOP_LOSS = 3600    # 손절 후 1시간 휴식
+COOLDOWN_VWAP_BREAK = 1800   # 지지 붕괴 시 30분 휴식
+COOLDOWN_TIME_CUT = 600      # 시간 손절 시 10분 휴식
+
+# 분할 익절 기준
+PARTIAL_SELL_RATIO = 0.5     # 분할 매도 비율 (50%)
+PARTIAL_SELL_MIN_PROFIT = 0.3 # 최소 0.3% 수익일 때만 분할 익절
+RSI_SELL_THRESHOLD = 70      # 과매수 매도 기준
+
+# =========================================================
+# [6. 호가창 분석 (Orderbook)]
+# =========================================================
+OB_DEPTH_COUNT = 5           # 분석할 호가 단계 수 (1~5호가)
+OB_BAD_RATIO = 3.0           # 매도벽이 매수벽의 3배면 나쁨 (시장가 매도)
+OB_GOOD_RATIO = 2.0          # 매수벽이 매도벽의 2배면 좋음
+
+# =========================================================
+# [7. 기타 필터 (Macro & Binance)]
+# =========================================================
+BINANCE_SURGE_THRESHOLD = 0.3
+ENABLE_MACRO_FILTER = True
+PRE_EVENT_BUFFER = 30
+POST_EVENT_BUFFER = 30
+MANUAL_BLOCK_TIMES = [
+    "2026-02-13 22:30",
+    "2026-02-20 04:00",
+]

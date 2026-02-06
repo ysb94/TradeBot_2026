@@ -1,12 +1,21 @@
 # main.py
-# [최종] 완벽한 매도 로직 (분할매도 + 호가창분석 + 지표손절)
+# [최종] 완벽한 매도 로직 (분할매도 + 호가창분석 + 지표손절 + 매크로필터)
 
 import asyncio
 from data_feed.aggregator import DataAggregator
 from strategy.signal_maker import SignalMaker
 from execution.order_manager import OrderManager
 from execution.risk_manager import RiskManager
-from config import TARGET_COINS, TRADE_AMOUNT, FOLLOWER_COINS, IS_SIMULATION
+from data_feed.macro_client import MacroClient # [신규] 매크로 클라이언트
+from config import (
+    TARGET_COINS,
+    TRADE_AMOUNT,
+    FOLLOWER_COINS,
+    IS_SIMULATION,
+    ENABLE_MACRO_FILTER,
+    MIN_ORDER_VALUE,
+    PARTIAL_SELL_RATIO,
+)
 
 async def main():
     print(f"========================================")
@@ -18,6 +27,7 @@ async def main():
     signal_maker = SignalMaker()
     order_manager = OrderManager()
     risk_manager = RiskManager()
+    macro_client = MacroClient() # [신규] 객체 생성
 
     asyncio.create_task(aggregator.run())
     print("⏳ 데이터 동기화 중... (3초)")
@@ -25,6 +35,17 @@ async def main():
 
     while True:
         try:
+            # ---------------------------------------------------------
+            # 🛑 [0] 거시경제 필터 (Macro Filter) - 최우선 순위
+            # ---------------------------------------------------------
+            if ENABLE_MACRO_FILTER:
+                is_risk, reason = macro_client.is_volatility_risk()
+                if is_risk:
+                    print(f"\n🚫 [MACRO] 매매 일시 정지: {reason}")
+                    print(f"   (변동성 완화 대기 중... 1분 Sleep)")
+                    await asyncio.sleep(60)
+                    continue # 아래 로직 실행 안 하고 루프 처음으로 돌아감
+
             print("\r", end="", flush=True) 
 
             # 0. 자산 조회
@@ -62,7 +83,7 @@ async def main():
                 if price is None or kimp is None: continue
 
                 balance = order_manager.get_balance(ticker)
-                has_coin = balance > 0 and (balance * price) > 5000
+                has_coin = balance > 0 and (balance * price) >= MIN_ORDER_VALUE
 
                 # [A] 매도 관리
                 if has_coin:
@@ -92,7 +113,7 @@ async def main():
                                 
                         elif action == "SELL_HALF":
                             # 분할 매도는 100% 시뮬레이션 지원이 어려우므로 실전/로그 위주
-                            order_manager.sell_percentage(ticker, 0.5, sell_strategy)
+                            order_manager.sell_percentage(ticker, PARTIAL_SELL_RATIO, sell_strategy)
 
                     else:
                         print(f"[{ticker.split('-')[1]} {msg}] ", end="", flush=True)

@@ -3,13 +3,17 @@
 
 import pandas as pd
 import numpy as np
+from config import RSI_LONG_PERIOD, RSI_SHORT_PERIOD, BB_PERIOD, BB_STD_DEV
+
 
 class TechnicalAnalyzer:
     def __init__(self):
         pass
 
-    def calculate_rsi(self, df, period=14):
+    def calculate_rsi(self, df, period=None):
         """RSI(상대강도지수) 계산"""
+        if period is None:
+            period = RSI_LONG_PERIOD
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
@@ -17,8 +21,12 @@ class TechnicalAnalyzer:
         rs = gain / loss
         return 100 - (100 / (1 + rs))
 
-    def calculate_bollinger_bands(self, df, period=20, std_dev=2):
+    def calculate_bollinger_bands(self, df, period=None, std_dev=None):
         """볼린저 밴드 계산 (상단, 중단, 하단)"""
+        if period is None:
+            period = BB_PERIOD
+        if std_dev is None:
+            std_dev = BB_STD_DEV
         sma = df['close'].rolling(window=period).mean() # 중단
         std = df['close'].rolling(window=period).std()  # 표준편차
 
@@ -41,9 +49,9 @@ class TechnicalAnalyzer:
         df = ohlcv_data.copy()
         
         # 1. 지표 계산
-        df['RSI_14'] = self.calculate_rsi(df, 14) # 장기 추세
-        df['RSI_9'] = self.calculate_rsi(df, 9)   # 단기 민감도 (골든크로스용)
-        df['BB_Upper'], df['BB_Mid'], df['BB_Lower'] = self.calculate_bollinger_bands(df, 20, 2)
+        df['RSI_14'] = self.calculate_rsi(df, RSI_LONG_PERIOD)  # 장기 추세
+        df['RSI_9'] = self.calculate_rsi(df, RSI_SHORT_PERIOD)  # 단기 민감도 (골든크로스용)
+        df['BB_Upper'], df['BB_Mid'], df['BB_Lower'] = self.calculate_bollinger_bands(df, BB_PERIOD, BB_STD_DEV)
         df['VWAP'] = self.calculate_vwap(df)      # 세력 평단가 (눌림목용)
         
         # 2. 최신 데이터 추출
@@ -54,8 +62,10 @@ class TechnicalAnalyzer:
             "current_price": latest['close'],
             "RSI_14": round(latest['RSI_14'], 2),
             "RSI_9": round(latest['RSI_9'], 2),
+            "BB_Upper": round(latest['BB_Upper'], 2),
+            "BB_Mid": round(latest['BB_Mid'], 2),
             "BB_Lower": round(latest['BB_Lower'], 2),
             "VWAP": round(latest['VWAP'], 2),
-            "is_oversold": latest['close'] <= latest['BB_Lower'], # 볼밴 하단 터치
+            "is_oversold": latest['close'] <= latest['BB_Lower'],  # 볼밴 하단 터치
             "is_rsi_low": latest['RSI_14'] < 30
         }

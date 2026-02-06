@@ -1,14 +1,18 @@
 # requirements.txt
-# 라이브러리 목록
+# pip install -r requirements.txt
 
-
-
-
-#pip install -r requirements.txt
-#pip install pandas numpy
-
+# 기본 비동기 및 통신
 ccxt
 websockets
 aiohttp
-asyncio
 python-dotenv
+requests
+
+# 업비트 API 및 데이터 분석
+pyupbit
+pandas
+numpy
+
+# 거시경제(Macro) 데이터 크롤링
+beautifulsoup4
+lxml
