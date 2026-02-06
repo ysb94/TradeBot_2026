@@ -1,5 +1,5 @@
 # main.py
-# [최종] 정밀 매수(골든크로스) + 정밀 매도(전략분리) + 쿨타임/시간손절
+# [최종] 완벽한 매도 로직 (분할매도 + 호가창분석 + 지표손절)
 
 import asyncio
 from data_feed.aggregator import DataAggregator
@@ -10,7 +10,7 @@ from config import TARGET_COINS, TRADE_AMOUNT, FOLLOWER_COINS, IS_SIMULATION
 
 async def main():
     print(f"========================================")
-    print(f"   🐙 2026 Octopus Bot - Final Version")
+    print(f"   🐙 2026 Octopus Bot - Perfect Selling")
     print(f"   Mode: {'🧪 Simulation' if IS_SIMULATION else '💳 Real Trading'}")
     print(f"========================================")
     
@@ -33,12 +33,11 @@ async def main():
             print(f"💰 {total_assets:,.0f}원 | ", end="", flush=True)
 
             # ---------------------------------------------------------
-            # 🔥 [1] 긴급 매수 (지정가 추격)
+            # 🔥 [1] 긴급 매수
             # ---------------------------------------------------------
             if aggregator.surge_detected:
                 print(f"\n\n{aggregator.surge_info}")
                 for coin in FOLLOWER_COINS:
-                    # 쿨타임 중이면 긴급 매수도 스킵 (안전 제일)
                     if risk_manager.is_in_cooldown(coin): continue
                     if order_manager.get_balance(coin) > 0: continue
                     
@@ -48,7 +47,7 @@ async def main():
                         risk_manager.register_buy(coin)
                 
                 aggregator.surge_detected = False
-                print("✅ 긴급 매수 주문 완료. 3초 대기...\n")
+                print("✅ 긴급 매수 완료. 3초 대기...\n")
                 await asyncio.sleep(3)
                 continue
 
@@ -68,28 +67,39 @@ async def main():
                 # [A] 매도 관리
                 if has_coin:
                     avg_price = order_manager.get_avg_buy_price(ticker)
-                    action, msg = risk_manager.check_exit_signal(ticker, price, avg_price)
                     
-                    if action == "SELL":
+                    # 🔍 [신규] 보유 코인 정밀 분석 (RSI, VWAP, BB)
+                    analysis = signal_maker.get_analysis_only(ticker)
+                    
+                    # 🚦 매도 신호 점검 (지표 데이터 함께 전달)
+                    action, msg = risk_manager.check_exit_signal(ticker, price, avg_price, analysis)
+                    
+                    if action != "HOLD":
                         print(f"\n{msg}")
                         
-                        # 손절 or 시간손절 -> 손절 전략 (빠른 탈출)
-                        if "손절" in msg:
-                            if order_manager.sell_stop_loss_strategy(ticker, balance):
-                                order_manager.simulation_sell(ticker, price)
+                        # 📼 [호가창 분석] 매도벽이 두꺼우면 시장가로 급하게 던짐
+                        ob_health = order_manager.analyze_orderbook_health(ticker)
+                        sell_strategy = "LIMIT" # 기본은 지정가
                         
-                        # 익절 -> 익절 전략 (고가 매도)
-                        else:
-                            if order_manager.sell_take_profit_strategy(ticker, balance):
+                        if ob_health == "BAD" or "손절" in msg:
+                            sell_strategy = "MARKET" # 매도벽 두껍거나 손절이면 시장가
+                            print(f"   ⚠️ 급한 매도 (호가창 나쁨 or 손절) -> 시장가 실행")
+
+                        # 실행
+                        if action == "SELL_ALL":
+                            if order_manager.sell_percentage(ticker, 1.0, sell_strategy):
                                 order_manager.simulation_sell(ticker, price)
+                                
+                        elif action == "SELL_HALF":
+                            # 분할 매도는 100% 시뮬레이션 지원이 어려우므로 실전/로그 위주
+                            order_manager.sell_percentage(ticker, 0.5, sell_strategy)
+
                     else:
                         print(f"[{ticker.split('-')[1]} {msg}] ", end="", flush=True)
 
                 # [B] 매수 관리
                 else:
-                    # 🧊 쿨타임 체크 (손절한 놈은 쳐다도 안 봄)
-                    if risk_manager.is_in_cooldown(ticker):
-                        continue
+                    if risk_manager.is_in_cooldown(ticker): continue
 
                     is_buy, reason = signal_maker.check_buy_signal(ticker, price, kimp)
                     if is_buy:
