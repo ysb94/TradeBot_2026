@@ -1,5 +1,5 @@
 # main.py
-# [최종] 정밀 매도 전략(손절/익절 분리) 적용
+# [최종] 정밀 매수(골든크로스) + 정밀 매도(전략분리) + 쿨타임/시간손절
 
 import asyncio
 from data_feed.aggregator import DataAggregator
@@ -10,7 +10,7 @@ from config import TARGET_COINS, TRADE_AMOUNT, FOLLOWER_COINS, IS_SIMULATION
 
 async def main():
     print(f"========================================")
-    print(f"   🐙 2026 Octopus Bot - Precision Selling")
+    print(f"   🐙 2026 Octopus Bot - Final Version")
     print(f"   Mode: {'🧪 Simulation' if IS_SIMULATION else '💳 Real Trading'}")
     print(f"========================================")
     
@@ -38,10 +38,11 @@ async def main():
             if aggregator.surge_detected:
                 print(f"\n\n{aggregator.surge_info}")
                 for coin in FOLLOWER_COINS:
+                    # 쿨타임 중이면 긴급 매수도 스킵 (안전 제일)
+                    if risk_manager.is_in_cooldown(coin): continue
                     if order_manager.get_balance(coin) > 0: continue
                     
                     price = aggregator.market_data[coin]['upbit']
-                    # 긴급 매수는 기존의 안전 지정가 사용
                     if price and order_manager.buy_limit_safe(coin, TRADE_AMOUNT):
                         order_manager.simulation_buy(coin, TRADE_AMOUNT, price)
                         risk_manager.register_buy(coin)
@@ -64,7 +65,7 @@ async def main():
                 balance = order_manager.get_balance(ticker)
                 has_coin = balance > 0 and (balance * price) > 5000
 
-                # [A] 매도 관리 (상황별 전략 호출)
+                # [A] 매도 관리
                 if has_coin:
                     avg_price = order_manager.get_avg_buy_price(ticker)
                     action, msg = risk_manager.check_exit_signal(ticker, price, avg_price)
@@ -72,21 +73,24 @@ async def main():
                     if action == "SELL":
                         print(f"\n{msg}")
                         
-                        # 상황 1: 손절 -> 손절 전용 전략 실행
+                        # 손절 or 시간손절 -> 손절 전략 (빠른 탈출)
                         if "손절" in msg:
                             if order_manager.sell_stop_loss_strategy(ticker, balance):
                                 order_manager.simulation_sell(ticker, price)
                         
-                        # 상황 2: 익절 -> 익절 전용 전략 실행
+                        # 익절 -> 익절 전략 (고가 매도)
                         else:
                             if order_manager.sell_take_profit_strategy(ticker, balance):
                                 order_manager.simulation_sell(ticker, price)
-
                     else:
                         print(f"[{ticker.split('-')[1]} {msg}] ", end="", flush=True)
 
                 # [B] 매수 관리
                 else:
+                    # 🧊 쿨타임 체크 (손절한 놈은 쳐다도 안 봄)
+                    if risk_manager.is_in_cooldown(ticker):
+                        continue
+
                     is_buy, reason = signal_maker.check_buy_signal(ticker, price, kimp)
                     if is_buy:
                         print(f"\n🔥 {ticker} 진입! ({reason})")

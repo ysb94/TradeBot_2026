@@ -1,10 +1,9 @@
-# signal_maker.py
-# 실질적인 **'판단'**을 내리는 곳입니다. 업비트 차트 데이터를 가져와서 우리의 전략(RSI + 볼밴 + 김프)에 맞는지 검사
+# strategy/signal_maker.py
+# [최종] RSI 골든크로스 + VWAP 지지 + 역프 스나이퍼 전략
 
 import pyupbit
 from strategy.indicators import TechnicalAnalyzer
 from strategy.calculator import TickCalculator
-# [수정] REVERSE_KIMP_THRESHOLD 임포트 추가
 from config import RSI_BUY_THRESHOLD, MAX_KIMP_THRESHOLD, MAX_TICKS_FOR_BEP, REVERSE_KIMP_THRESHOLD
 
 class SignalMaker:
@@ -14,43 +13,56 @@ class SignalMaker:
 
     def check_buy_signal(self, ticker, current_price, current_kimp):
         """
-        매수 신호 점검 (하이브리드 전략 + 틱 가치 필터 + 역프 스나이퍼)
+        매수 신호 점검 (RSI 골든크로스 + 볼밴 + VWAP + 김프)
         """
-        # 1. 김프 필터 (고김프 매수 금지)
+        # 1. 김프 필터
         if current_kimp > MAX_KIMP_THRESHOLD:
             return False, f"김프 과열({current_kimp:.2f}%)"
 
-        # 2. 동적 틱 가치 분석 (손익분기점 체크)
-        # 수수료 떼고 본전 찾는데 너무 많은 틱이 필요하면 진입 금지
+        # 2. 틱 효율성(BEP) 체크
         ticks_to_bep, _ = self.calculator.get_ticks_to_bep(current_price)
         if ticks_to_bep > MAX_TICKS_FOR_BEP:
             return False, f"틱 효율 나쁨(본전까지 {ticks_to_bep}틱 필요)"
 
-        # 3. 데이터 수집
+        # 3. 데이터 수집 (VWAP 정확도를 위해 200개 조회)
         try:
-            df = pyupbit.get_ohlcv(ticker, interval="minute1", count=50)
+            df = pyupbit.get_ohlcv(ticker, interval="minute1", count=200)
             if df is None: return False, "데이터 없음"
         except: return False, "API 오류"
 
         # 4. 지표 분석
         analysis = self.analyzer.analyze_1m_candle(df)
-        rsi = analysis['RSI']
+        rsi_14 = analysis['RSI_14']
+        rsi_9 = analysis['RSI_9']
         is_bb_touch = analysis['is_oversold']
+        vwap = analysis['VWAP']
 
         # =========================================================
-        # 🔥 [3순위 기능] 역프리미엄 스나이퍼 (신규 추가)
+        # 🔥 [3순위] 역프리미엄 스나이퍼
         # =========================================================
-        # 김프가 -1.0% 이하(역프)라면, 아주 강력한 매수 기회로 판단
         if current_kimp <= REVERSE_KIMP_THRESHOLD:
-            # 조건 완화: RSI가 평소보다 10 높아도 OK, 볼린저밴드 터치 안 해도 OK
-            # (역프 자체가 강력한 과매도/반등 시그널이기 때문)
-            relaxed_rsi_threshold = RSI_BUY_THRESHOLD + 10 
-            
-            if rsi < relaxed_rsi_threshold:
-                return True, f"🔥 역프 스나이퍼 발동! (김프:{current_kimp:.2f}%, RSI:{rsi:.1f})"
+            # 역프 상태면 RSI 기준을 +10만큼 완화
+            if rsi_14 < (RSI_BUY_THRESHOLD + 10):
+                return True, f"🔥 역프 스나이퍼 (김프:{current_kimp:.2f}%, RSI:{rsi_14})"
 
-        # 5. 일반 매수 조건 (RSI + 볼린저밴드 정석 투자)
-        if rsi < RSI_BUY_THRESHOLD and is_bb_touch:
-            return True, f"매수조건 만족 (RSI:{rsi:.1f}, BB터치, BEP:{ticks_to_bep}틱)"
+        # =========================================================
+        # 🎯 [핵심] 정밀 매수 전략 (보고서 기반)
+        # 1. RSI(14) 과매도권 (기본 조건)
+        # 2. 볼린저 밴드 하단 터치 (과매도 확인)
+        # 3. RSI(9) > RSI(14) (골든크로스: 반등 시작)
+        # 4. VWAP 지지 (현재가가 VWAP보다 너무 낮지 않아야 함 - 하락세 진정 확인)
+        # =========================================================
         
-        return False, f"관망 (RSI:{rsi:.1f}, 필요틱:{ticks_to_bep})"
+        is_rsi_golden_cross = rsi_9 > rsi_14
+        
+        # VWAP 대비 이격도가 -1.0% 이내인지 확인 (너무 싼 건 떨어지는 칼날일 수 있음)
+        # 단, 급락 후 반등 시점에는 VWAP보다 한참 아래일 수 있으므로 보조 조건으로만 활용
+        # 여기서는 '골든크로스'를 최우선으로 봅니다.
+        
+        if rsi_14 < RSI_BUY_THRESHOLD and is_bb_touch:
+            if is_rsi_golden_cross:
+                return True, f"⚡ 골든크로스 진입! (RSI9:{rsi_9} > RSI14:{rsi_14})"
+            else:
+                return False, f"반등 대기중 (RSI9:{rsi_9} < RSI14:{rsi_14})"
+        
+        return False, f"관망 (RSI14:{rsi_14}, RSI9:{rsi_9})"
