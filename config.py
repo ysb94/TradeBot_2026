@@ -50,8 +50,6 @@ MAX_TICKS_FOR_BEP = 15
 MAX_KIMP_THRESHOLD = 5.0    
 REVERSE_KIMP_THRESHOLD = -1.0 # 역프 -1.0% 도달 시 강력 매수
 
-STOP_LOSS_PCT = -1.5        # -1.5% 손절 (변동성 장세라 짧게)
-TAKE_PROFIT_PCT = 1.0       # 1.0% 익절
 
 # [4. 주문 및 API 설정]
 # ⚠️ 주의: 실전 매매를 원하시면 True를 False로 변경하세요!
@@ -68,3 +66,13 @@ BINANCE_SURGE_THRESHOLD = 0.3
 
 # BTC가 튀면 따라갈 녀석들 (오늘 거래량 터진 놈들 순서)
 FOLLOWER_COINS = ["KRW-XRP", "KRW-SOL", "KRW-ETH", "KRW-DOGE"]
+
+
+# [리스크 관리]
+STOP_LOSS_PCT = -1.5        # 손절 기준
+TAKE_PROFIT_PCT = 1.0       # (사용 안 함, 트레일링 스탑으로 대체됨)
+
+# [트레일링 스탑 설정]
+# 0.5% 수익 나기 시작하면 감시 -> 고점 대비 0.3% 하락 시 매도
+TRAILING_START = 0.5  
+TRAILING_DROP = 0.3
