@@ -8,7 +8,7 @@ except Exception:
 # =========================================================
 # [1. 시스템 및 API 설정]
 # =========================================================
-IS_SIMULATION = False  # 실전 여부
+IS_SIMULATION = True  # 실전 여부 (True=가상매매)
 UPBIT_ACCESS_KEY = os.getenv("UPBIT_ACCESS_KEY", "")
 UPBIT_SECRET_KEY = os.getenv("UPBIT_SECRET_KEY", "")
 
@@ -18,11 +18,13 @@ OHLCV_INTERVAL = "minute1"  # 캔들 조회 기준
 OHLCV_COUNT = 200           # 캔들 조회 개수
 MIN_ORDER_VALUE = 5005       # 최소 주문 가능 금액 (업비트 5000원 + 여유분)
 
+# [가상 매매 설정]
+SIMULATION_BALANCE = 1_000_000_000 # 모의 투자 시작 금액
 # =========================================================
 # [2. 타겟 및 자산 설정]
 # =========================================================
 CURRENT_EXCHANGE_RATE = 1465.09
-TRADE_AMOUNT = 6000  # 1회 진입 금액
+TRADE_AMOUNT = 10_000_000  # 1회 진입 금액 (1억원)
 
 TARGET_COINS = {
     "KRW-XRP": "xrpusdt",
@@ -97,6 +99,8 @@ ENABLE_MACRO_FILTER = True
 PRE_EVENT_BUFFER = 30
 POST_EVENT_BUFFER = 30
 MANUAL_BLOCK_TIMES = [
-    "2026-02-13 22:30",
-    "2026-02-20 04:00",
+#"2026-03-15 21:30",
+    # 필요한 만큼 추가
+
+# 수동 경재 캘린더
 ]

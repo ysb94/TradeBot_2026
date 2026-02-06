@@ -1,40 +1,49 @@
-# aggregator.py
-# asyncio를 사용하여 업비트와 바이낸스의 웹소켓을 **병렬(동시)**로 연결하고, 데이터가 들어올 때마다 즉시 김프를 계산
-#
+# data_feed/aggregator.py
+# [최종] 동적 설정 변경(Dynamic Config) 자동 감지 및 재연결 기능 탑재
+
 import asyncio
 import json
 import time
 import websockets
-from collections import deque # [추가] 과거 데이터 저장용
+from collections import deque
 import config
 
 class DataAggregator:
     def __init__(self):
+        # 초기화 시점에만 config 참조 (이후 loop에서 갱신됨)
         self.market_data = {
-            ticker: {"upbit": None, "binance": None, "kimp": None}
+            ticker: {"upbit": None, "binance": None, "kimp": None} 
             for ticker in config.TARGET_COINS.keys()
         }
         self.binance_map = {v: k for k, v in config.TARGET_COINS.items()}
 
-        # [리더-팔로워용] BTC 가격 기록 (시간, 가격)
+        # BTC 급등 감지용
         self.btc_history = deque(maxlen=20) 
-        self.surge_detected = False # 급등 감지 플래그
-        self.surge_info = ""        # 로그용 메시지
+        self.surge_detected = False
+        self.surge_info = ""
 
     async def connect_upbit(self):
-        """업비트: 여러 종목 한 번에 구독"""
+        """업비트 웹소켓 (설정 변경 자동 감지)"""
         uri = "wss://api.upbit.com/websocket/v1"
-        target_codes = list(config.TARGET_COINS.keys())
-
+        
         while True:
             try:
+                # 1. 루프 시작 시점의 최신 타겟 가져오기
+                current_target_keys = list(config.TARGET_COINS.keys())
+                
+                # 2. Market Data 딕셔너리 동기화 (없는 키 추가)
+                for ticker in current_target_keys:
+                    if ticker not in self.market_data:
+                        self.market_data[ticker] = {"upbit": None, "binance": None, "kimp": None}
+                        print(f"➕ [Aggregator] 신규 감시 추가: {ticker}")
+
                 async with websockets.connect(uri) as websocket:
                     subscribe_fmt = [
                         {"ticket": "octopus-bot"},
-                        {"type": "ticker", "codes": target_codes}
+                        {"type": "ticker", "codes": current_target_keys}
                     ]
                     await websocket.send(json.dumps(subscribe_fmt))
-                    print(f"✅ [Upbit] 종목 구독 완료")
+                    print(f"✅ [Upbit] 구독 시작 ({len(current_target_keys)}개 종목)")
 
                     while True:
                         data = await websocket.recv()
@@ -42,21 +51,35 @@ class DataAggregator:
                         code = data['code']
                         price = float(data['trade_price'])
                         
+                        # 삭제된 코인 데이터가 들어오면 무시
+                        if code not in config.TARGET_COINS: continue
+                        
                         self.market_data[code]['upbit'] = price
                         self.calculate_kimp(code)
                         
+                        # 🔥 [핵심] 설정 변경 감지 (타겟 개수가 달라지면 재접속)
+                        if len(current_target_keys) != len(config.TARGET_COINS):
+                            print("🔄 [Upbit] 타겟 변경 감지 -> 재구독 시도")
+                            break # 내부 루프 탈출 -> 바깥 루프에서 재접속
+
             except Exception as e:
                 print(f"⚠️ [Upbit] Error: {e}")
                 await asyncio.sleep(2)
 
     async def connect_binance(self):
-        """바이낸스: 리더(BTC) 감시 및 급등 포착"""
-        streams = "/".join([f"{sym}@ticker" for sym in config.TARGET_COINS.values()])
-        uri = f"wss://stream.binance.com:9443/stream?streams={streams}"
-        
+        """바이낸스 웹소켓 (설정 변경 자동 감지)"""
         while True:
             try:
-                print(f"✅ [Binance] 리더-팔로워 엔진 가동 중...")
+                # 1. 최신 타겟 및 스트림 주소 생성
+                current_symbols = list(config.TARGET_COINS.values())
+                streams = "/".join([f"{sym}@ticker" for sym in current_symbols])
+                uri = f"wss://stream.binance.com:9443/stream?streams={streams}"
+                
+                # 2. 맵핑 업데이트
+                self.binance_map = {v: k for k, v in config.TARGET_COINS.items()}
+
+                print(f"✅ [Binance] 리더-팔로워 엔진 가동 ({len(current_symbols)}개)")
+                
                 async with websockets.connect(uri) as websocket:
                     while True:
                         resp = await websocket.recv()
@@ -69,39 +92,37 @@ class DataAggregator:
                         # 데이터 업데이트
                         if symbol in self.binance_map:
                             upbit_code = self.binance_map[symbol]
-                            self.market_data[upbit_code]['binance'] = price
-                            self.calculate_kimp(upbit_code)
+                            # 삭제된 코인이면 스킵
+                            if upbit_code in self.market_data:
+                                self.market_data[upbit_code]['binance'] = price
+                                self.calculate_kimp(upbit_code)
 
-                        # 🔥 [핵심] BTC(btcusdt) 급등 감지 로직
+                        # BTC 급등 감지
                         if symbol == "btcusdt":
                             self.detect_btc_surge(price)
-                            
+                        
+                        # 🔥 [핵심] 설정 변경 감지
+                        if len(current_symbols) != len(config.TARGET_COINS):
+                            print("🔄 [Binance] 타겟 변경 감지 -> 재구독 시도")
+                            break # 재접속
+
             except Exception as e:
                 print(f"⚠️ [Binance] Error: {e}")
                 await asyncio.sleep(2)
 
     def detect_btc_surge(self, current_price):
-        """BTC 가격이 1초 전 대비 급등했는지 검사"""
         now = time.time()
         self.btc_history.append((now, current_price))
-
-        # 1초 전 데이터 찾기 (약 1.0 ~ 1.5초 전)
-        # deque에는 (시간, 가격) 튜플이 저장됨
         prev_price = None
         
-        # 가장 오래된 데이터가 너무 옛날(2초 이상)이면 버림
         while self.btc_history and self.btc_history[0][0] < now - 2.0:
             self.btc_history.popleft()
 
-        # 1초 전 데이터 조회 (없으면 가장 오래된 데이터 사용)
         if len(self.btc_history) > 1:
-            prev_price = self.btc_history[0][1] # 약 1초 전 가격
+            prev_price = self.btc_history[0][1]
 
         if prev_price:
-            # 변동률 계산
             change_rate = ((current_price - prev_price) / prev_price) * 100
-            
-            # 급등 기준 초과 시 신호 발생
             if change_rate >= config.BINANCE_SURGE_THRESHOLD:
                 self.surge_detected = True
                 self.surge_info = f"🚀 [LEADER] BTC 급등 감지! (+{change_rate:.2f}% in 1s)"
