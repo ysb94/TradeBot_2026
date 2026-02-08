@@ -15,11 +15,9 @@ from market_scanner import get_strategy_recommendation # [신규] 스캐너 함�
 async def auto_tuner_loop():
     """
     [AI Auto Pilot] 4시간마다 전 종목을 스캔하여 타겟을 교체합니다.
+    (봇 시작 시 즉시 1회 실행 후, 4시간 주기 반복)
     """
     while True:
-        # 봇 시작 직후에는 바로 스캔하지 않고, 4시간 대기
-        await asyncio.sleep(14400) 
-        
         print(f"\n🧠 [Auto Tuner] 시장 전체 스캔 및 타겟 교체 시작... ({time.strftime('%H:%M')})")
         
         try:
@@ -29,24 +27,27 @@ async def auto_tuner_loop():
 
             if not new_targets:
                 print("⚠️ [Tuner] 스캔 결과 없음 -> 기존 타겟 유지")
-                continue
+            else:
+                # 2. 설정 교체 (Memory Swap)
+                old_count = len(config.TARGET_COINS)
+                config.TARGET_COINS = new_targets
+                config.FOLLOWER_COINS = recommendation['FOLLOWER_COINS']
+                
+                # (선택) 지표 기준도 시장 상황에 맞게 변경
+                config.RSI_BUY_THRESHOLD = recommendation['RSI_BUY_THRESHOLD']
+                
+                print(f"✅ [Tuner] 타겟 리빌딩 완료 ({old_count}개 -> {len(new_targets)}개)")
+                print(f"   - 신규 타겟: {list(new_targets.keys())}")
+            
+            # 타겟이 바뀌면 Aggregator가 내부 루프에서 len() 차이를 감지하고
+            # 자동으로 웹소켓을 재연결합니다.
 
-            # 2. 설정 교체 (Memory Swap)
-            old_count = len(config.TARGET_COINS)
-            config.TARGET_COINS = new_targets
-            config.FOLLOWER_COINS = recommendation['FOLLOWER_COINS']
-            
-            # (선택) 지표 기준도 시장 상황에 맞게 변경
-            config.RSI_BUY_THRESHOLD = recommendation['RSI_BUY_THRESHOLD']
-            
-            print(f"✅ [Tuner] 타겟 리빌딩 완료 ({old_count}개 -> {len(new_targets)}개)")
-            print(f"   - 신규 타겟: {list(new_targets.keys())}")
-            
-            # Aggregator는 내부적으로 config.TARGET_COINS의 길이(개수)가 변하면
-            # 자동으로 재접속하도록 설계되어 있습니다. (aggregator.py 참조)
-            
         except Exception as e:
             print(f"⚠️ [Tuner] 최적화 실패: {e}")
+
+        # 3. 작업 완료 후 대기 (순서 중요: 작업 -> 대기)
+        print("💤 4시간 대기 모드 진입...")
+        await asyncio.sleep(14400) 
 
 async def main():
     print(f"========================================")
@@ -72,7 +73,9 @@ async def main():
 
     while True:
         try:
-            # 🛑 [0] 거시경제 필터
+            # ---------------------------------------------------------
+            # 🛑 [0] 거시경제 필터 (Macro Filter)
+            # ---------------------------------------------------------
             if config.ENABLE_MACRO_FILTER:
                 is_risk, reason = macro_client.is_volatility_risk()
                 if is_risk:
@@ -87,7 +90,9 @@ async def main():
             total_assets = order_manager.get_total_assets(current_prices)
             print(f"💰 {total_assets:,.0f}원 | ", end="", flush=True)
 
+            # ---------------------------------------------------------
             # 🔥 [1] 긴급 매수 (FOLLOWER_COINS)
+            # ---------------------------------------------------------
             if aggregator.surge_detected:
                 print(f"\n\n{aggregator.surge_info}")
                 for coin in config.FOLLOWER_COINS:
@@ -104,7 +109,9 @@ async def main():
                 await asyncio.sleep(3)
                 continue
 
+            # ---------------------------------------------------------
             # 🎯 [2] 일반 매매 (TARGET_COINS)
+            # ---------------------------------------------------------
             # 딕셔너리가 스캐너에 의해 변경될 수 있으므로 list()로 키 복사
             for ticker in list(config.TARGET_COINS.keys()):
                 
@@ -153,15 +160,17 @@ async def main():
                     
                     safe_kimp = kimp if kimp is not None else 0.0
                     
+                    # 매수 신호 확인
                     is_buy, reason, analysis = signal_maker.check_buy_signal(ticker, price, safe_kimp)
                     
                     if is_buy:
-                        # 허매수 필터
+                        # ✅ [허매수 필터] 호가창 속임수 판독
                         trades = aggregator.trade_history.get(ticker, None)
                         if order_manager.check_fake_buy(ticker, trades):
-                            print(f"\r🚫 {ticker} 허매수 감지 -> 진입 취소")
+                            print(f"\r🚫 {ticker} 허매수 감지(벽만 두껍고 체결 없음) -> 진입 취소")
                             continue
 
+                        # 진입 실행
                         print(f"\n🔥 {ticker} 진입! ({reason})")
                         if order_manager.get_balance("KRW") >= config.TRADE_AMOUNT:
                             if order_manager.buy_limit_safe(ticker, config.TRADE_AMOUNT):
@@ -181,6 +190,7 @@ async def main():
 
 if __name__ == "__main__":
     try:
+        # 윈도우 환경설정 (필요시)
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         asyncio.run(main())
     except KeyboardInterrupt:
