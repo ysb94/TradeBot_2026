@@ -26,6 +26,10 @@ SIMULATION_BALANCE = 1_000_000_000 # 모의 투자 시작 금액
 CURRENT_EXCHANGE_RATE = 1465.09
 TRADE_AMOUNT = 10_000_000  # 1회 진입 금액 (1억원)
 
+# ✅ [신규] 리스크 관리 (Dynamic Sizing) 설정
+MAX_ASSET_RATIO = 0.25     # 자산의 25%까지만 한 종목에 투자 (몰빵 방지)
+MAX_OB_RATIO = 0.1         # 매도 잔량의 10%까지만 주문 (슬리피지 방지)
+
 TARGET_COINS = {
     "KRW-XRP": "xrpusdt",
     "KRW-BTC": "btcusdt",
@@ -68,7 +72,7 @@ TRAILING_DROP = 0.3          # 트레일링 낙폭 (%)
 
 # 지표 손절 기준
 VWAP_STOP_FACTOR = 0.99      # VWAP * 0.99 밑으로 깨지면 손절
-RSI_PANIC_SELL = 25          # RSI가 이 값 밑으로 급락하면 투매로 간주
+RSI_PANIC_SELL = 15          # RSI가 이 값 밑으로 급락하면 투매로 간주
 
 # 시간 손절 (Time Cut)
 TIME_CUT_SECONDS = 180       # 진입 후 N초 경과 시 검사

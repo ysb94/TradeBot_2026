@@ -1,50 +1,84 @@
 # main.py
-# [최종] 완벽한 매도 로직 (분할매도 + 호가창분석 + 지표손절 + 매크로필터)
+# [최종] 전 종목 자동 스캔 + 완벽한 매도 + 허매수 필터 + 로깅
 
 import asyncio
+import time
+import config
 from data_feed.aggregator import DataAggregator
 from strategy.signal_maker import SignalMaker
 from execution.order_manager import OrderManager
 from execution.risk_manager import RiskManager
-from data_feed.macro_client import MacroClient # [신규] 매크로 클라이언트
-from config import (
-    TARGET_COINS,
-    TRADE_AMOUNT,
-    FOLLOWER_COINS,
-    IS_SIMULATION,
-    ENABLE_MACRO_FILTER,
-    MIN_ORDER_VALUE,
-    PARTIAL_SELL_RATIO,
-)
+from data_feed.macro_client import MacroClient
+from trade_logger import TradeLogger
+from market_scanner import get_strategy_recommendation # [신규] 스캐너 함수
+
+async def auto_tuner_loop():
+    """
+    [AI Auto Pilot] 4시간마다 전 종목을 스캔하여 타겟을 교체합니다.
+    """
+    while True:
+        # 봇 시작 직후에는 바로 스캔하지 않고, 4시간 대기
+        await asyncio.sleep(14400) 
+        
+        print(f"\n🧠 [Auto Tuner] 시장 전체 스캔 및 타겟 교체 시작... ({time.strftime('%H:%M')})")
+        
+        try:
+            # 1. 시장 스캔 및 추천 설정 가져오기
+            recommendation = get_strategy_recommendation()
+            new_targets = recommendation['TARGET_COINS']
+
+            if not new_targets:
+                print("⚠️ [Tuner] 스캔 결과 없음 -> 기존 타겟 유지")
+                continue
+
+            # 2. 설정 교체 (Memory Swap)
+            old_count = len(config.TARGET_COINS)
+            config.TARGET_COINS = new_targets
+            config.FOLLOWER_COINS = recommendation['FOLLOWER_COINS']
+            
+            # (선택) 지표 기준도 시장 상황에 맞게 변경
+            config.RSI_BUY_THRESHOLD = recommendation['RSI_BUY_THRESHOLD']
+            
+            print(f"✅ [Tuner] 타겟 리빌딩 완료 ({old_count}개 -> {len(new_targets)}개)")
+            print(f"   - 신규 타겟: {list(new_targets.keys())}")
+            
+            # Aggregator는 내부적으로 config.TARGET_COINS의 길이(개수)가 변하면
+            # 자동으로 재접속하도록 설계되어 있습니다. (aggregator.py 참조)
+            
+        except Exception as e:
+            print(f"⚠️ [Tuner] 최적화 실패: {e}")
 
 async def main():
     print(f"========================================")
-    print(f"   🐙 2026 Octopus Bot - Perfect Selling")
-    print(f"   Mode: {'🧪 Simulation' if IS_SIMULATION else '💳 Real Trading'}")
+    print(f"   🐙 2026 Octopus Bot - Auto Discovery")
+    print(f"   Mode: {'🧪 Simulation' if config.IS_SIMULATION else '💳 Real Trading'}")
     print(f"========================================")
     
+    # 객체 생성
     aggregator = DataAggregator()
     signal_maker = SignalMaker()
     order_manager = OrderManager()
     risk_manager = RiskManager()
-    macro_client = MacroClient() # [신규] 객체 생성
+    macro_client = MacroClient()
+    logger = TradeLogger()
 
+    # [신규] 자동 튜너(스캐너) 백그라운드 실행
+    asyncio.create_task(auto_tuner_loop())
+
+    # 데이터 수집 시작
     asyncio.create_task(aggregator.run())
     print("⏳ 데이터 동기화 중... (3초)")
     await asyncio.sleep(3)
 
     while True:
         try:
-            # ---------------------------------------------------------
-            # 🛑 [0] 거시경제 필터 (Macro Filter) - 최우선 순위
-            # ---------------------------------------------------------
-            if ENABLE_MACRO_FILTER:
+            # 🛑 [0] 거시경제 필터
+            if config.ENABLE_MACRO_FILTER:
                 is_risk, reason = macro_client.is_volatility_risk()
                 if is_risk:
-                    print(f"\n🚫 [MACRO] 매매 일시 정지: {reason}")
-                    print(f"   (변동성 완화 대기 중... 1분 Sleep)")
+                    print(f"\n🚫 [MACRO] {reason} -> 1분 대기")
                     await asyncio.sleep(60)
-                    continue # 아래 로직 실행 안 하고 루프 처음으로 돌아감
+                    continue 
 
             print("\r", end="", flush=True) 
 
@@ -53,88 +87,93 @@ async def main():
             total_assets = order_manager.get_total_assets(current_prices)
             print(f"💰 {total_assets:,.0f}원 | ", end="", flush=True)
 
-            # ---------------------------------------------------------
-            # 🔥 [1] 긴급 매수
-            # ---------------------------------------------------------
+            # 🔥 [1] 긴급 매수 (FOLLOWER_COINS)
             if aggregator.surge_detected:
                 print(f"\n\n{aggregator.surge_info}")
-                for coin in FOLLOWER_COINS:
+                for coin in config.FOLLOWER_COINS:
                     if risk_manager.is_in_cooldown(coin): continue
                     if order_manager.get_balance(coin) > 0: continue
                     
-                    price = aggregator.market_data[coin]['upbit']
-                    if price and order_manager.buy_limit_safe(coin, TRADE_AMOUNT):
-                        order_manager.simulation_buy(coin, TRADE_AMOUNT, price)
+                    price = aggregator.market_data[coin]['upbit'] if coin in aggregator.market_data else None
+                    if price and order_manager.buy_limit_safe(coin, config.TRADE_AMOUNT):
+                        order_manager.simulation_buy(coin, config.TRADE_AMOUNT, price)
                         risk_manager.register_buy(coin)
+                        logger.log(coin, "BUY_URGENT", price, None, 0.0, "BTC 급등 추격")
                 
                 aggregator.surge_detected = False
-                print("✅ 긴급 매수 완료. 3초 대기...\n")
                 await asyncio.sleep(3)
                 continue
 
-            # ---------------------------------------------------------
-            # 🎯 [2] 일반 매매
-            # ---------------------------------------------------------
-            for ticker in TARGET_COINS.keys():
+            # 🎯 [2] 일반 매매 (TARGET_COINS)
+            # 딕셔너리가 스캐너에 의해 변경될 수 있으므로 list()로 키 복사
+            for ticker in list(config.TARGET_COINS.keys()):
+                
+                # 아직 데이터 수신 전이면 스킵
+                if ticker not in aggregator.market_data: continue
+                
                 data = aggregator.market_data[ticker]
                 price = data['upbit']
                 kimp = data['kimp']
 
-                if price is None or kimp is None: continue
+                if price is None: continue 
 
                 balance = order_manager.get_balance(ticker)
-                has_coin = balance > 0 and (balance * price) >= MIN_ORDER_VALUE
+                has_coin = balance > 0 and (balance * price) >= config.MIN_ORDER_VALUE
 
                 # [A] 매도 관리
                 if has_coin:
                     avg_price = order_manager.get_avg_buy_price(ticker)
-                    
-                    # 🔍 [신규] 보유 코인 정밀 분석 (RSI, VWAP, BB)
                     analysis = signal_maker.get_analysis_only(ticker)
-                    
-                    # 🚦 매도 신호 점검 (지표 데이터 함께 전달)
                     action, msg = risk_manager.check_exit_signal(ticker, price, avg_price, analysis)
                     
                     if action != "HOLD":
                         print(f"\n{msg}")
-                        
-                        # 📼 [호가창 분석] 매도벽이 두꺼우면 시장가로 급하게 던짐
                         ob_health = order_manager.analyze_orderbook_health(ticker)
-                        sell_strategy = "LIMIT" # 기본은 지정가
-                        
-                        if ob_health == "BAD" or "손절" in msg:
-                            sell_strategy = "MARKET" # 매도벽 두껍거나 손절이면 시장가
-                            print(f"   ⚠️ 급한 매도 (호가창 나쁨 or 손절) -> 시장가 실행")
+                        sell_strategy = "LIMIT"
+                        if ob_health == "BAD" or "손절" in msg: sell_strategy = "MARKET"
 
-                        # 실행
+                        executed = False
                         if action == "SELL_ALL":
                             if order_manager.sell_percentage(ticker, 1.0, sell_strategy):
                                 order_manager.simulation_sell(ticker, price)
-                                
+                                executed = True
                         elif action == "SELL_HALF":
-                            # 분할 매도는 100% 시뮬레이션 지원이 어려우므로 실전/로그 위주
-                            order_manager.sell_percentage(ticker, PARTIAL_SELL_RATIO, sell_strategy)
-
+                            if order_manager.sell_percentage(ticker, config.PARTIAL_SELL_RATIO, sell_strategy):
+                                executed = True
+                        
+                        if executed:
+                            profit_rate = ((price - avg_price) / avg_price) * 100
+                            logger.log(ticker, action, price, analysis, profit_rate, msg)
                     else:
                         print(f"[{ticker.split('-')[1]} {msg}] ", end="", flush=True)
 
                 # [B] 매수 관리
                 else:
                     if risk_manager.is_in_cooldown(ticker): continue
-
-                    is_buy, reason = signal_maker.check_buy_signal(ticker, price, kimp)
+                    
+                    safe_kimp = kimp if kimp is not None else 0.0
+                    
+                    is_buy, reason, analysis = signal_maker.check_buy_signal(ticker, price, safe_kimp)
+                    
                     if is_buy:
+                        # 허매수 필터
+                        trades = aggregator.trade_history.get(ticker, None)
+                        if order_manager.check_fake_buy(ticker, trades):
+                            print(f"\r🚫 {ticker} 허매수 감지 -> 진입 취소")
+                            continue
+
                         print(f"\n🔥 {ticker} 진입! ({reason})")
-                        if order_manager.get_balance("KRW") >= TRADE_AMOUNT:
-                            if order_manager.buy_limit_safe(ticker, TRADE_AMOUNT):
-                                order_manager.simulation_buy(ticker, TRADE_AMOUNT, price)
+                        if order_manager.get_balance("KRW") >= config.TRADE_AMOUNT:
+                            if order_manager.buy_limit_safe(ticker, config.TRADE_AMOUNT):
+                                order_manager.simulation_buy(ticker, config.TRADE_AMOUNT, price)
                                 risk_manager.register_buy(ticker)
+                                logger.log(ticker, "BUY", price, analysis, 0.0, reason)
                                 await asyncio.sleep(1)
                     else:
                         icon = "🟢" if is_buy else "⚪"
                         print(f"[{ticker.split('-')[1]} {icon}] ", end="", flush=True)
 
-            await asyncio.sleep(1)
+            await asyncio.sleep(config.LOOP_DELAY)
 
         except Exception as e:
             print(f"\n⚠️ Error: {e}")
