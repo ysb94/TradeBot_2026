@@ -1,4 +1,9 @@
+<<<<<<< HEAD
 ✅ 1단계: 기록 시스템 구축 (Data Logging) 목표: 매매가 왜 일어났는지, 결과는 어떤지 엑셀로 남겨서 전략을 검증할 수 있게 만듭니다. (가장 시급함)
+=======
+✅ 1단계: 기록 시스템 구축 (Data Logging)
+목표: 매매가 왜 일어났는지, 결과는 어떤지 엑셀로 남겨서 전략을 검증할 수 있게 만듭니다. (가장 시급함)
+>>>>>>> 8e1d67ac5bd8e7c47b5c7145a6087e4b9fb73180
 
 [ ] 1-1. 서기 고용 (trade_logger.py 생성)
 
@@ -16,7 +21,12 @@ main.py에 logger 인스턴스 생성.
 
 매수/매도 성공 시 logger.log()를 호출하여 기록 남기기.
 
+<<<<<<< HEAD
 🛡️ 2단계: 안전장치 강화 (Dynamic Sizing) 목표: 작은 코인에 큰돈이 들어가서 물리거나, 슬리피지로 손해 보는 것을 방지합니다.
+=======
+🛡️ 2단계: 안전장치 강화 (Dynamic Sizing)
+목표: 작은 코인에 큰돈이 들어가서 물리거나, 슬리피지로 손해 보는 것을 방지합니다.
+>>>>>>> 8e1d67ac5bd8e7c47b5c7145a6087e4b9fb73180
 
 [ ] 2-1. 이중 안전장치 탑재 (execution/order_manager.py 수정)
 
@@ -28,7 +38,12 @@ buy_limit_safe 함수에서 무조건 설정값(TRADE_AMOUNT)을 쓰지 않고, 
 
 SIMULATION_BALANCE등이 제대로 설정되어 있는지 확인.
 
+<<<<<<< HEAD
 👁️ 3단계: 호가창 속임수 판독 (Advanced Tape Reading) 목표: 단순 잔량 비율이 아니라, **"실제 체결 속도"**를 보고 세력의 의도를 파악합니다.
+=======
+👁️ 3단계: 호가창 속임수 판독 (Advanced Tape Reading)
+목표: 단순 잔량 비율이 아니라, **"실제 체결 속도"**를 보고 세력의 의도를 파악합니다.
+>>>>>>> 8e1d67ac5bd8e7c47b5c7145a6087e4b9fb73180
 
 [ ] 3-1. 데이터 수신 채널 확장 (data_feed/aggregator.py 수정)
 
@@ -42,7 +57,12 @@ SIMULATION_BALANCE등이 제대로 설정되어 있는지 확인.
 
 매수벽이 두꺼운데 체결은 안 되고 있다면 **'허매수'**로 판단하는 로직 구현.
 
+<<<<<<< HEAD
 🔍 4단계: 종목 발굴 자동화 (Funnel Filtering) 목표: 소수의 지정된 코인만 보는 게 아니라, 시장 전체에서 기회를 포착합니다.
+=======
+🔍 4단계: 종목 발굴 자동화 (Funnel Filtering)
+목표: 소수의 지정된 코인만 보는 게 아니라, 시장 전체에서 기회를 포착합니다.
+>>>>>>> 8e1d67ac5bd8e7c47b5c7145a6087e4b9fb73180
 
 [ ] 4-1. 광범위 스캐너 개발 (market_scanner.py 업그레이드)
 
@@ -52,4 +72,8 @@ SIMULATION_BALANCE등이 제대로 설정되어 있는지 확인.
 
 [ ] 4-2. 자동 타겟 변경 (Dynamic Targeting)
 
+<<<<<<< HEAD
 main.py의 auto_tuner_loop가 스캐너의 결과를 받아와서 config.TARGET_COINS를 실시간으로 갈아끼우도록 연동.
+=======
+main.py의 auto_tuner_loop가 스캐너의 결과를 받아와서 config.TARGET_COINS를 실시간으로 갈아끼우도록 연동.
+>>>>>>> 8e1d67ac5bd8e7c47b5c7145a6087e4b9fb73180
