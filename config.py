@@ -53,10 +53,10 @@ BB_STD_DEV = 2           # 볼린저밴드 승수 (표준편차)
 # =========================================================
 # [4. 매수 전략 (Entry Strategy)]
 # =========================================================
-RSI_BUY_THRESHOLD = 25       # 매수 기준 RSI
+RSI_BUY_THRESHOLD = 30       # 매수 기준 RSI
 BB_MULTIPLIER = 2.2          # (market_scanner 추천값 등)
 MAX_TICKS_FOR_BEP = 15       # BEP 틱 제한
-MAX_KIMP_THRESHOLD = 5.0     # 김프 제한
+MAX_KIMP_THRESHOLD = 6.0     # 김프 제한
 REVERSE_KIMP_THRESHOLD = -1.0 # 역프 기준
 
 # 정밀 진입 조건
@@ -108,3 +108,18 @@ MANUAL_BLOCK_TIMES = [
 
 # 수동 경재 캘린더
 ]
+
+
+# =========================================================
+# [8. AI 위원회 및 뉴스 API 설정] (신규 추가)
+# =========================================================
+# 1. API 키 (.env에서 로드)
+CRYPTOPANIC_API_KEY = os.getenv("CRYPTOPANIC_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+
+# 2. 사용할 AI 모델 정의 (가성비 vs 성능)
+MODEL_CHAIRMAN = "gpt-4o"            # 의장 (GPT-4o)
+MODEL_BULL = "gemini-2.5-flash"     # 공격수 (Gemini Flash - 무료/저렴)
+MODEL_BEAR = "claude-haiku-4-5" # 수비수 (Claude Haiku - 저렴)

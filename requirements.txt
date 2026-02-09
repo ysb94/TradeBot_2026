@@ -16,3 +16,8 @@ numpy
 # 거시경제(Macro) 데이터 크롤링
 beautifulsoup4
 lxml
+
+# ✅ [신규] AI 3대장 라이브러리 추가
+openai
+google-generativeai
+anthropic

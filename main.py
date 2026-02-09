@@ -12,42 +12,48 @@ from data_feed.macro_client import MacroClient
 from trade_logger import TradeLogger
 from market_scanner import get_strategy_recommendation # [신규] 스캐너 함수
 
+# main.py 내부의 auto_tuner_loop 함수
+
 async def auto_tuner_loop():
-    """
-    [AI Auto Pilot] 주기적으로 전 종목을 스캔하여 타겟을 교체합니다.
-    """
-    # ✅ [설정] 스캔 주기: 1800초 = 30분
-    SCAN_INTERVAL = 1800 
+    SCAN_INTERVAL = 1800 # 30분 주기
 
     while True:
-        print(f"\n🧠 [Auto Tuner] 시장 분석 및 타겟 교체 시작... ({time.strftime('%H:%M')})")
+        print(f"\n🧠 [Auto Tuner] AI 위원회 소집 및 전략 최적화... ({time.strftime('%H:%M')})")
         
         try:
-            # 1. 시장 스캔 및 추천 설정 가져오기
+            # 1. 스캐너 + AI 분석 결과 수신
             recommendation = get_strategy_recommendation()
             new_targets = recommendation['TARGET_COINS']
 
             if not new_targets:
-                print("⚠️ [Tuner] 스캔 결과 없음 -> 기존 타겟 유지")
+                print("⚠️ [Tuner] 스캔 결과 없음 -> 기존 유지")
             else:
-                # 2. 설정 교체 (Memory Swap)
                 old_count = len(config.TARGET_COINS)
+                
+                # 2. 타겟 코인 교체
                 config.TARGET_COINS = new_targets
                 config.FOLLOWER_COINS = recommendation['FOLLOWER_COINS']
                 
-                # (선택) 지표 기준도 시장 상황에 맞게 변경
+                # 3. 🔥 [핵심] AI가 정해준 수치로 설정 덮어쓰기
                 config.RSI_BUY_THRESHOLD = recommendation['RSI_BUY_THRESHOLD']
+                config.MAX_KIMP_THRESHOLD = recommendation['MAX_KIMP_THRESHOLD']
+                config.STOP_LOSS_PCT = recommendation['STOP_LOSS_PCT']
+                config.MAX_TICKS_FOR_BEP = recommendation['MAX_TICKS_FOR_BEP']
                 
-                print(f"✅ [Tuner] 타겟 리빌딩 완료 ({old_count}개 -> {len(new_targets)}개)")
-                print(f"   - 신규 타겟: {list(new_targets.keys())}")
+                # AI가 추가로 주는 정밀 익절 옵션들 (없으면 기본값 유지하도록 get)
+                config.PARTIAL_SELL_MIN_PROFIT = recommendation.get('PARTIAL_SELL_MIN_PROFIT', 0.5)
+                config.TRAILING_START = recommendation.get('TRAILING_START', 0.5)
                 
-            # 타겟이 바뀌면 Aggregator가 내부 루프에서 len() 차이를 감지하고
-            # 자동으로 웹소켓을 재연결합니다.
+                reason = recommendation.get('REASON', 'Technical')
+
+                print(f"✅ [Tuner] AI 전략 업데이트 완료 ({reason})")
+                print(f"   - 진입: RSI<{config.RSI_BUY_THRESHOLD}, 김프<{config.MAX_KIMP_THRESHOLD}%")
+                print(f"   - 청산: 손절 {config.STOP_LOSS_PCT}%, 1차익절(50%) {config.PARTIAL_SELL_MIN_PROFIT}%")
+                print(f"   - 추격: 나머지 50%는 {config.TRAILING_START}% 수익부터 트레일링 스탑 가동")
 
         except Exception as e:
             print(f"⚠️ [Tuner] 최적화 실패: {e}")
 
-        # 3. 작업 완료 후 대기 (순서: 실행 -> 대기)
         print(f"💤 {int(SCAN_INTERVAL/60)}분 대기 모드 진입...")
         await asyncio.sleep(SCAN_INTERVAL)
 

@@ -1,190 +1,105 @@
 # market_scanner.py
-# [V2 Upgrade] 시장 온도(Regime) 기반 동적 스캐닝 & 파라미터 튜닝
+# [V3 Integrated] 차트 분석 + AI 위원회(Ensemble) 통합 전략
 
 import pyupbit
 import time
 import requests
-import numpy as np
-import pandas as pd
 from strategy.indicators import TechnicalAnalyzer
 import config
+from ai_analyst import AIAnalyst # ✅ 신규 모듈 임포트
 
 class MarketScanner:
     def __init__(self):
         self.analyzer = TechnicalAnalyzer()
-        self.market_status = "NEUTRAL" # 초기 상태
+        self.ai_analyst = AIAnalyst() # AI 객체 생성
 
     def get_all_krw_tickers(self):
-        try:
-            return pyupbit.get_tickers(fiat="KRW")
-        except:
-            return []
+        try: return pyupbit.get_tickers(fiat="KRW")
+        except: return []
 
     def get_top_volume_coins(self, limit=30):
-        """유동성 상위 N개 코인 조회"""
+        # ... (기존 유동성 조회 로직 유지) ...
         try:
             tickers = self.get_all_krw_tickers()
             if not tickers: return []
-
-            # 업비트 Ticker API로 거래대금 조회
             url = "https://api.upbit.com/v1/ticker"
             params = {"markets": ",".join(tickers)}
             resp = requests.get(url, params=params).json()
-            
-            # 24시간 누적 거래대금(acc_trade_price_24h) 기준 내림차순 정렬
             sorted_data = sorted(resp, key=lambda x: x['acc_trade_price_24h'], reverse=True)
             return [item['market'] for item in sorted_data[:limit]]
-        except Exception as e:
-            print(f"⚠️ [Scanner] 유동성 분석 실패: {e}")
-            return []
-
-    def analyze_market_regime(self):
-        """
-        [핵심] 시장의 온도를 측정하여 장세를 판단함
-        Return: "BULL"(불장), "BEAR"(하락장), "NEUTRAL"(횡보)
-        """
-        try:
-            # 대장주(BTC) + 거래상위 5개 종목의 추세 확인
-            leaders = ["KRW-BTC"] + self.get_top_volume_coins(limit=5)
-            rsi_sum = 0
-            count = 0
-
-            print("\n🌡️ [Scanner] 시장 온도 측정 중...")
-            for ticker in leaders:
-                time.sleep(0.05)
-                df = pyupbit.get_ohlcv(ticker, interval="minute60", count=24) # 1시간봉 기준
-                if df is None: continue
-                
-                # indicators.py의 analyzer 사용
-                rsi = self.analyzer.calculate_rsi(df).iloc[-1]
-                rsi_sum += rsi
-                count += 1
-
-            # 평균 RSI 계산
-            avg_rsi = rsi_sum / count if count > 0 else 50
-            
-            # 장세 판단 로직
-            if avg_rsi >= 58:
-                self.market_status = "BULL"
-                print(f"🔥 시장 상태: [강세장] (Avg RSI: {avg_rsi:.1f}) -> 공격적 모드 가동")
-            elif avg_rsi <= 38:
-                self.market_status = "BEAR"
-                print(f"❄️ 시장 상태: [약세장] (Avg RSI: {avg_rsi:.1f}) -> 방어적 모드 가동")
-            else:
-                self.market_status = "NEUTRAL"
-                print(f"⚖️ 시장 상태: [횡보장] (Avg RSI: {avg_rsi:.1f}) -> 균형 모드 가동")
-
-            return self.market_status, avg_rsi
-
-        except Exception as e:
-            print(f"⚠️ 시장 분석 실패: {e}")
-            return "NEUTRAL", 50
+        except: return []
 
     def scan_market(self):
-        """장세에 따라 유연하게 종목을 발굴"""
-        # 1. 시장 온도 측정
-        regime, avg_rsi = self.analyze_market_regime()
-        
-        # 2. 장세별 스캔 조건 설정 (동적 변화)
-        if regime == "BULL":
-            # 불장: 물 들어올 때 노 젓자
-            scan_limit = 50       # 더 많은 종목을 탐색
-            target_count = 10     # 타겟을 많이 가져감 (분산 투자)
-            rsi_criteria = 55     # RSI가 55 이하여도 눌림목으로 간주 (공격적)
-            
-        elif regime == "BEAR":
-            # 하락장: 소나기는 피하자
-            scan_limit = 20       # 거래량 터진 확실한 놈만 봄
-            target_count = 3      # 소수 정예 (집중 투자)
-            rsi_criteria = 25     # 정말 싼 거 아니면 쳐다도 안 봄 (방어적)
-            
-        else: # NEUTRAL
-            # 횡보장: 기본값
-            scan_limit = 30
-            target_count = 5
-            rsi_criteria = 35
-
-        # 3. 스캔 시작
-        candidates = self.get_top_volume_coins(limit=scan_limit)
+        """
+        [1. 차트 분석] 기술적 지표로 1차 타겟 선정
+        """
+        candidates = self.get_top_volume_coins(limit=40)
         selected_coins = {}
-
-        print(f"🔍 [Scanner] 조건 적용: 상위 {scan_limit}개 중 RSI {rsi_criteria} 이하 발굴")
-
+        
+        # 일단 안전하게 비트, 이더, 리플은 기본 포함
+        defaults = {"KRW-BTC": "btcusdt", "KRW-ETH": "ethusdt", "KRW-XRP": "xrpusdt"}
+        
+        print(f"\n🔍 [Scanner] 기술적 타겟 발굴 시작 ({len(candidates)}개)...")
         for ticker in candidates:
             try:
-                # 대장주는 무조건 포함 (시장 지표용)
-                if ticker in ["KRW-BTC", "KRW-ETH", "KRW-XRP"]:
-                    symbol = ticker.replace("KRW-", "").lower() + "usdt"
-                    selected_coins[ticker] = symbol
-                    continue
-
-                time.sleep(0.1)
-                df = pyupbit.get_ohlcv(ticker, interval="minute15", count=60) # 15분봉 기준
+                if ticker in defaults: continue # 기본 타겟은 나중에 합침
+                time.sleep(0.05)
+                df = pyupbit.get_ohlcv(ticker, interval="minute15", count=60)
                 if df is None: continue
 
                 analysis = self.analyzer.analyze_1m_candle(df)
-                current_rsi = analysis['RSI_14']
-                bb_lower = analysis['BB_Lower']
-                current_price = analysis['current_price']
-
-                # 🔥 동적 조건 적용
-                # 1) 설정된 동적 RSI 기준보다 낮거나
-                # 2) 볼밴 하단을 뚫고 내려갔거나 (과매도)
-                if current_rsi <= rsi_criteria or current_price <= bb_lower:
+                
+                # 기술적 필터 (RSI 40 이하 or 볼밴 하단) - 느슨하게 잡음 (AI가 거를 거니까)
+                if analysis['RSI_14'] <= 40 or analysis['is_oversold']:
                     symbol = ticker.replace("KRW-", "").lower() + "usdt"
                     selected_coins[ticker] = symbol
-                    print(f"   👉 발굴: {ticker} (RSI: {current_rsi:.1f})")
-
-                if len(selected_coins) >= target_count:
-                    break
-
             except: continue
-
-        # 최소 수량 보정 (너무 없으면 대장주라도 넣음)
-        if len(selected_coins) < 2:
-            defaults = {"KRW-BTC": "btcusdt", "KRW-ETH": "ethusdt"}
+        
+        # 타겟이 너무 적으면 기본 종목 추가
+        if len(selected_coins) < 3:
             selected_coins.update(defaults)
+            
+        return selected_coins
 
-        return selected_coins, regime
-
-# ==========================================================
-# main.py에서 호출하는 함수
-# ==========================================================
 def get_strategy_recommendation():
     """
-    AI Auto Pilot이 호출하는 메인 함수
+    [Main Logic] 차트 타겟 + AI 파라미터 융합
     """
     scanner = MarketScanner()
-    new_targets, regime = scanner.scan_market()
     
-    # 장세에 따른 config 파라미터 자동 튜닝
-    # (시장 상황에 맞춰 봇의 성격을 바꿈)
+    # 1. 기술적 분석으로 타겟 코인 선정
+    tech_targets = scanner.scan_market()
     
-    if regime == "BULL":
-        # 불장: RSI 기준을 높여서 적극적으로 삼
-        rec_rsi_threshold = 50 
-        rec_kimp_max = 7.0 # 김프 좀 껴도 봐줌
-        
-    elif regime == "BEAR":
-        # 하락장: RSI 기준을 낮춰서 바닥만 잡음
-        rec_rsi_threshold = 22 
-        rec_kimp_max = 3.0 # 김프 끼면 칼같이 거름
-        
-    else:
-        # 횡보장: 기본값
-        rec_rsi_threshold = 28
-        rec_kimp_max = 5.0
+    # 2. AI 위원회 소집 (뉴스 + 거시경제 분석)
+    #    (API 호출 실패 시 None 반환)
+    ai_params = scanner.ai_analyst.get_consensus_params()
+    
+    final_params = {}
 
-    return {
-        'TARGET_COINS': new_targets,
-        'FOLLOWER_COINS': list(new_targets.keys())[:5],
-        'RSI_BUY_THRESHOLD': rec_rsi_threshold,  # 🔥 핵심: 동적 변경
-        'MAX_KIMP_THRESHOLD': rec_kimp_max,      # 🔥 핵심: 동적 변경
-        'BB_MULTIPLIER': 2.0,
-        'REVERSE_KIMP_THRESHOLD': -0.5,
-        'CURRENT_EXCHANGE_RATE': 1465.0
-    }
+    # [Case A] AI가 성공적으로 전략을 줬을 때 -> AI 의견 전적으로 채택
+    if ai_params:
+        print(f"🧠 [Strategy] AI 위원회 전략 적용 완료")
+        final_params = ai_params # RSI, 손절가, 김프 등 AI값 사용
+    
+    # [Case B] AI 호출 실패/오류 시 -> 보수적인 기본값(Fallback) 사용
+    else:
+        print(f"⚠️ [Strategy] AI 분석 실패 -> 안전 모드(Fallback) 가동")
+        final_params = {
+            'RSI_BUY_THRESHOLD': 30,
+            'MAX_KIMP_THRESHOLD': 5.0,
+            'STOP_LOSS_PCT': -1.5,
+            'MAX_TICKS_FOR_BEP': 13,
+            'PARTIAL_SELL_MIN_PROFIT': 0.5,
+            'TRAILING_START': 0.5,
+            'REASON': 'AI Connection Failed'
+        }
+
+    # 3. 공통 데이터 병합 (타겟 코인 등)
+    final_params['TARGET_COINS'] = tech_targets
+    final_params['FOLLOWER_COINS'] = list(tech_targets.keys())[:5]
+    final_params['BB_MULTIPLIER'] = 2.0
+    
+    return final_params
 
 if __name__ == "__main__":
-    # 테스트 실행
     print(get_strategy_recommendation())

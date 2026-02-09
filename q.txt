@@ -1,0 +1,260 @@
+
+
+
+    # ai_analyst.py
+# [V10 Masterpiece] 고성능 페르소나 프롬프트 복구 + JSON 파싱 안전장치
+
+import json
+import requests
+import re
+import warnings
+import os
+import config
+
+# [1] 경고 메시지 차단
+os.environ["GRPC_VERBOSITY"] = "ERROR"
+warnings.filterwarnings("ignore")
+
+import openai
+import google.generativeai as genai
+from anthropic import Anthropic
+
+class AIAnalyst:
+    def __init__(self):
+        print("\n🔍 [AI Analyst] 초기화 및 모델명 점검...")
+        
+        # 1. ChatGPT (의장)
+        self.openai_client = openai.OpenAI(api_key=config.OPENAI_API_KEY)
+        
+        # 2. Gemini (공격수)
+        genai.configure(api_key=config.GOOGLE_API_KEY)
+        bull_model = config.MODEL_BULL.strip()
+        print(f"   👉 Gemini Model: '{bull_model}' (공격수)") 
+        self.gemini_model = genai.GenerativeModel(bull_model)
+        
+        # 3. Claude (수비수)
+        bear_model = config.MODEL_BEAR.strip()
+        print(f"   👉 Claude Model: '{bear_model}' (수비수)")
+        self.claude_client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
+
+    # ---------------------------------------------------------
+    # 📰 1. 뉴스 데이터 수집 (CryptoPanic V2)
+    # ---------------------------------------------------------
+    def get_crypto_news(self):
+        base_url = "https://cryptopanic.com/api/developer/v2/posts/"
+        params = {
+            "auth_token": config.CRYPTOPANIC_API_KEY,
+            "public": "true",
+            "filter": "hot",
+            "kind": "news"
+        }
+        
+        try:
+            if not config.CRYPTOPANIC_API_KEY: return "API Key missing."
+            
+            resp = requests.get(base_url, params=params, timeout=10)
+            data = resp.json()
+            
+            if 'results' not in data: return "News fetch failed."
+
+            news_list = [post['title'] for post in data['results']]
+            if not news_list: return "No news found."
+            
+            print(f"📰 [News] V2 API로 뉴스 {len(news_list)}건 수집 완료")
+            return "\n".join(news_list)
+
+        except:
+            return "Market data unavailable."
+
+    def get_fear_greed_index(self):
+        try:
+            url = "https://api.alternative.me/fng/"
+            resp = requests.get(url, timeout=5).json()
+            return int(resp['data'][0]['value'])
+        except:
+            return 50
+
+    # ---------------------------------------------------------
+    # 🔧 2. JSON 파싱 및 데이터 보정 (강력함 유지)
+    # ---------------------------------------------------------
+    def _parse_json(self, text):
+        try:
+            # 1. 마크다운 및 공백 제거
+            text = re.sub(r'```json\s*', '', text)
+            text = re.sub(r'```', '', text)
+            text = text.strip()
+            
+            # 2. 중괄호 {} 추출 (잡담 제거)
+            start_index = text.find('{')
+            end_index = text.rfind('}')
+            if start_index != -1 and end_index != -1:
+                text = text[start_index : end_index + 1]
+            else:
+                return None
+            
+            # 3. JSON 변환
+            data = json.loads(text)
+
+            # 4. 손절가 음수 보정
+            if 'STOP_LOSS' in data:
+                sl = float(data['STOP_LOSS'])
+                if sl > 0: data['STOP_LOSS'] = -sl
+                
+            return data
+
+        except Exception as e:
+            print(f"🚨 [JSON 파싱 실패] 내용: {text[:50]}... 원인: {e}")
+            return None
+
+    # ---------------------------------------------------------
+    # 🦁 3. Gemini (공격수) - 프롬프트 복구 완료
+    # ---------------------------------------------------------
+    def ask_gemini_bull(self, news, fng):
+        prompt = f"""
+        Role: You are a **High-Frequency Trading (HFT) Alpha Strategist**.
+        Your Motto: "Volatility is opportunity. We buy the fear and ride the momentum."
+        
+        [Market Context]
+        - FNG Index: {fng}
+        - News:
+        {news}
+        
+        [Task]
+        Analyze the news for potential upside catalysts.
+        Propose **aggressive** trading parameters to maximize profit.
+        
+        [Guidelines]
+        1. **RSI_BUY**: Higher values (40-55). Catch the rebound early.
+        2. **STOP_LOSS**: Loose stops (-3.0% to -6.0%). Give room to breathe.
+        3. **KIMP_MAX**: High tolerance (5.0% - 10.0%). Ride the buying pressure.
+        
+        [Output Format]
+        Return ONLY a JSON object:
+        {{
+            "RSI_BUY": (int),
+            "STOP_LOSS": (float, negative),
+            "KIMP_MAX": (float),
+            "BEP_TICKS": (int)
+        }}
+        """
+        try:
+            resp = self.gemini_model.generate_content(prompt)
+            return self._parse_json(resp.text)
+        except Exception as e:
+            print(f"⚠️ [Gemini] 오류: {e}")
+            return None
+
+    # ---------------------------------------------------------
+    # 🐢 4. Claude (수비수) - 프롬프트 복구 완료
+    # ---------------------------------------------------------
+    def ask_claude_bear(self, news, fng):
+        prompt = f"""
+        Role: You are the **Chief Risk Officer (CRO)** of a conservative hedge fund.
+        Your Motto: "Capital preservation comes first. Better to miss a trade than lose money."
+        
+        [Market Context]
+        - FNG Index: {fng}
+        - News:
+        {news}
+        
+        [Task]
+        Analyze the news for potential risks (hacks, regulation, macro).
+        Propose **strictly defensive** trading parameters.
+        
+        [Guidelines]
+        1. **RSI_BUY**: Low values (20-30). Buy only on extreme oversold.
+        2. **STOP_LOSS**: Tight stops (-0.5% to -2.0%). Cut losses immediately.
+        3. **KIMP_MAX**: Low tolerance (1.0% - 3.0%). Avoid bubbles.
+        
+        [Output Format]
+        Return ONLY a JSON object:
+        {{
+            "RSI_BUY": (int),
+            "STOP_LOSS": (float, negative),
+            "KIMP_MAX": (float),
+            "BEP_TICKS": (int)
+        }}
+        """
+        try:
+            msg = self.claude_client.messages.create(
+                model=config.MODEL_BEAR.strip(),
+                max_tokens=250,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return self._parse_json(msg.content[0].text)
+        except Exception as e:
+            print(f"⚠️ [Claude] 오류: {e}")
+            return None
+
+    # ---------------------------------------------------------
+    # ⚖️ 5. 의장(ChatGPT) 최종 합의
+    # ---------------------------------------------------------
+    def ask_gpt_chairman(self, news, fng, bull_view, bear_view):
+        prompt = f"""
+        Role: Chief Investment Officer (CIO).
+        Context: FNG {fng}, News: {news[:500]}
+        Opinions: 
+        - Bull (Aggressive): {bull_view}
+        - Bear (Conservative): {bear_view}
+
+        Task: Synthesize these opinions and decide the FINAL strategy.
+        
+        Logic:
+        - Negative News -> Lean towards Bear.
+        - Positive News -> Lean towards Bull.
+        - Mixed/Ambiguous -> Balanced approach.
+
+        Output JSON: 
+        {{ 
+            "RSI_BUY_THRESHOLD": int, 
+            "MAX_KIMP_THRESHOLD": float, 
+            "STOP_LOSS_PCT": float, 
+            "MAX_TICKS_FOR_BEP": int, 
+            "PARTIAL_SELL_MIN_PROFIT": float, 
+            "TRAILING_START": float, 
+            "REASON": str 
+        }}
+        """
+        try:
+            resp = self.openai_client.chat.completions.create(
+                model=config.MODEL_CHAIRMAN,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"}
+            )
+            return json.loads(resp.choices[0].message.content)
+        except Exception as e:
+            print(f"⚠️ [Chairman] 합의 실패: {e}")
+            return None
+
+    # ---------------------------------------------------------
+    # 🚀 메인 실행 함수
+    # ---------------------------------------------------------
+    def get_consensus_params(self):
+        print("\n🧠 [AI Analyst] 3대 AI 위원회 소집 (News+Gemini+Claude+GPT)...")
+        
+        news = self.get_crypto_news()
+        fng = self.get_fear_greed_index()
+        
+        bull = self.ask_gemini_bull(news, fng)
+        bear = self.ask_claude_bear(news, fng)
+        
+        if not bull or not bear:
+            print("⚠️ 위원 의견 수렴 실패 -> 기본 로직 사용")
+            return None
+
+        print(f"   - 🦁 Gemini(공격): RSI {bull.get('RSI_BUY')}, 손절 {bull.get('STOP_LOSS')}%")
+        print(f"   - 🐢 Claude(수비): RSI {bear.get('RSI_BUY')}, 손절 {bear.get('STOP_LOSS')}%")
+
+        final_decision = self.ask_gpt_chairman(news, fng, bull, bear)
+        
+        if final_decision:
+            print(f"   👨‍⚖️ 의장(GPT) 최종 승인: RSI {final_decision['RSI_BUY_THRESHOLD']}, "
+                  f"손절 {final_decision['STOP_LOSS_PCT']}%, "
+                  f"이유: {final_decision['REASON']}")
+            return final_decision
+        else:
+            return None
+
+if __name__ == "__main__":
+    ai = AIAnalyst()
+    print(ai.get_consensus_params())
