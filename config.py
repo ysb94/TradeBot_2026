@@ -123,3 +123,8 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 MODEL_CHAIRMAN = "gpt-4o"            # 의장 (GPT-4o)
 MODEL_BULL = "gemini-2.5-flash"     # 공격수 (Gemini Flash - 무료/저렴)
 MODEL_BEAR = "claude-haiku-4-5" # 수비수 (Claude Haiku - 저렴)
+
+# =========================================================
+# [9. 계좌 보호 설정 (Circuit Breaker)] ✅ 신규 추가
+# =========================================================
+MAX_GLOBAL_LOSS_PCT = 3.0  # 원금 대비 3% 손실 시 봇 강제 종료

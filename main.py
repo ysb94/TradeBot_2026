@@ -1,5 +1,5 @@
 # main.py
-# [최종] 전 종목 자동 스캔 + 완벽한 매도 + 허매수 필터 + 로깅 + [30분 주기]
+# [V12 Circuit Breaker] 계좌 손절 기능 추가 (손실 시 신규 매수 중단 -> 청산 후 종료)
 
 import asyncio
 import time
@@ -10,11 +10,12 @@ from execution.order_manager import OrderManager
 from execution.risk_manager import RiskManager
 from data_feed.macro_client import MacroClient
 from trade_logger import TradeLogger
-from market_scanner import get_strategy_recommendation # [신규] 스캐너 함수
-
-# main.py 내부의 auto_tuner_loop 함수
+from market_scanner import get_strategy_recommendation
 
 async def auto_tuner_loop():
+    """
+    30분마다 AI 위원회를 소집하여 전략을 최적화하는 루프
+    """
     SCAN_INTERVAL = 1800 # 30분 주기
 
     while True:
@@ -28,19 +29,16 @@ async def auto_tuner_loop():
             if not new_targets:
                 print("⚠️ [Tuner] 스캔 결과 없음 -> 기존 유지")
             else:
-                old_count = len(config.TARGET_COINS)
-                
-                # 2. 타겟 코인 교체
                 config.TARGET_COINS = new_targets
                 config.FOLLOWER_COINS = recommendation['FOLLOWER_COINS']
                 
-                # 3. 🔥 [핵심] AI가 정해준 수치로 설정 덮어쓰기
+                # 2. AI가 정해준 수치로 설정 덮어쓰기
                 config.RSI_BUY_THRESHOLD = recommendation['RSI_BUY_THRESHOLD']
                 config.MAX_KIMP_THRESHOLD = recommendation['MAX_KIMP_THRESHOLD']
                 config.STOP_LOSS_PCT = recommendation['STOP_LOSS_PCT']
                 config.MAX_TICKS_FOR_BEP = recommendation['MAX_TICKS_FOR_BEP']
                 
-                # AI가 추가로 주는 정밀 익절 옵션들 (없으면 기본값 유지하도록 get)
+                # AI가 추가로 주는 정밀 익절 옵션들 (없으면 기본값 유지)
                 config.PARTIAL_SELL_MIN_PROFIT = recommendation.get('PARTIAL_SELL_MIN_PROFIT', 0.5)
                 config.TRAILING_START = recommendation.get('TRAILING_START', 0.5)
                 
@@ -71,13 +69,19 @@ async def main():
     macro_client = MacroClient()
     logger = TradeLogger()
 
-    # [신규] 자동 튜너(스캐너) 백그라운드 실행
+    # 백그라운드 태스크 실행
     asyncio.create_task(auto_tuner_loop())
-
-    # 데이터 수집 시작
     asyncio.create_task(aggregator.run())
+
     print("⏳ 데이터 동기화 중... (3초)")
     await asyncio.sleep(3)
+
+    # 🛡️ [서킷 브레이커] 초기 자산 저장
+    current_prices_init = {t: d['upbit'] for t, d in aggregator.market_data.items() if d['upbit']}
+    initial_total_assets = order_manager.get_total_assets(current_prices_init)
+    is_circuit_break = False # 비상 정지 플래그
+
+    print(f"💰 초기 자산: {initial_total_assets:,.0f}원 (손실 한도: -{config.MAX_GLOBAL_LOSS_PCT}%)")
 
     while True:
         try:
@@ -93,15 +97,32 @@ async def main():
 
             print("\r", end="", flush=True) 
 
-            # 0. 자산 조회
+            # ---------------------------------------------------------
+            # 💰 자산 조회 및 서킷 브레이커 체크
+            # ---------------------------------------------------------
             current_prices = {t: d['upbit'] for t, d in aggregator.market_data.items() if d['upbit']}
-            total_assets = order_manager.get_total_assets(current_prices)
-            print(f"💰 {total_assets:,.0f}원 | ", end="", flush=True)
+            current_total_assets = order_manager.get_total_assets(current_prices)
+            
+            # 수익률 계산
+            pnl_rate = 0.0
+            if initial_total_assets > 0:
+                pnl_rate = ((current_total_assets - initial_total_assets) / initial_total_assets) * 100
+
+            # 상태 출력
+            status_icon = "🟢" if not is_circuit_break else "🔴 [종료중]"
+            print(f"{status_icon} {current_total_assets:,.0f}원 ({pnl_rate:+.2f}%) | ", end="", flush=True)
+
+            # 🚨 [서킷 브레이커 발동 조건]
+            if not is_circuit_break and pnl_rate <= -config.MAX_GLOBAL_LOSS_PCT:
+                is_circuit_break = True
+                print(f"\n\n🚨 [Circuit Breaker] 누적 손실 {pnl_rate:.2f}% 도달! 신규 매수를 중단합니다.")
+                print("   👉 보유 코인 청산 후 봇을 자동 종료합니다.")
 
             # ---------------------------------------------------------
             # 🔥 [1] 긴급 매수 (FOLLOWER_COINS)
             # ---------------------------------------------------------
-            if aggregator.surge_detected:
+            # 서킷 브레이커 발동 시에는 긴급 매수도 금지
+            if not is_circuit_break and aggregator.surge_detected:
                 print(f"\n\n{aggregator.surge_info}")
                 for coin in config.FOLLOWER_COINS:
                     if risk_manager.is_in_cooldown(coin): continue
@@ -120,10 +141,10 @@ async def main():
             # ---------------------------------------------------------
             # 🎯 [2] 일반 매매 (TARGET_COINS)
             # ---------------------------------------------------------
-            # 딕셔너리가 스캐너에 의해 변경될 수 있으므로 list()로 키 복사
-            for ticker in list(config.TARGET_COINS.keys()):
-                
-                # 아직 데이터 수신 전이면 스킵
+            active_tickers = list(config.TARGET_COINS.keys())
+            holding_count = 0 # 보유 중인 코인 개수 집계
+
+            for ticker in active_tickers:
                 if ticker not in aggregator.market_data: continue
                 
                 data = aggregator.market_data[ticker]
@@ -135,8 +156,9 @@ async def main():
                 balance = order_manager.get_balance(ticker)
                 has_coin = balance > 0 and (balance * price) >= config.MIN_ORDER_VALUE
 
-                # [A] 매도 관리
+                # [A] 매도 관리 (서킷 브레이커 상태여도 매도는 정상 작동해야 함)
                 if has_coin:
+                    holding_count += 1
                     avg_price = order_manager.get_avg_buy_price(ticker)
                     analysis = signal_maker.get_analysis_only(ticker)
                     action, msg = risk_manager.check_exit_signal(ticker, price, avg_price, analysis)
@@ -162,23 +184,24 @@ async def main():
                     else:
                         print(f"[{ticker.split('-')[1]} {msg}] ", end="", flush=True)
 
-                # [B] 매수 관리
+                # [B] 매수 관리 (서킷 브레이커 발동 시 스킵)
                 else:
+                    if is_circuit_break:
+                        continue # 비상 상황이므로 매수 로직 패스
+
                     if risk_manager.is_in_cooldown(ticker): continue
                     
                     safe_kimp = kimp if kimp is not None else 0.0
                     
-                    # 매수 신호 확인
                     is_buy, reason, analysis = signal_maker.check_buy_signal(ticker, price, safe_kimp)
                     
                     if is_buy:
-                        # ✅ [허매수 필터] 호가창 속임수 판독
+                        # 허매수 필터
                         trades = aggregator.trade_history.get(ticker, None)
                         if order_manager.check_fake_buy(ticker, trades):
                             print(f"\r🚫 {ticker} 허매수 감지(벽만 두껍고 체결 없음) -> 진입 취소")
                             continue
 
-                        # 진입 실행
                         print(f"\n🔥 {ticker} 진입! ({reason})")
                         if order_manager.get_balance("KRW") >= config.TRADE_AMOUNT:
                             if order_manager.buy_limit_safe(ticker, config.TRADE_AMOUNT):
@@ -189,6 +212,13 @@ async def main():
                     else:
                         icon = "🟢" if is_buy else "⚪"
                         print(f"[{ticker.split('-')[1]} {icon}] ", end="", flush=True)
+
+            # 🛑 [서킷 브레이커 종료 조건]
+            # 비상 모드인데 + 보유 코인이 0개다? -> 봇 완전히 종료
+            if is_circuit_break and holding_count == 0:
+                print(f"\n\n🛑 [System] 모든 자산 청산 완료. 누적 손실 {pnl_rate:.2f}%로 봇을 종료합니다.")
+                print("   수고하셨습니다. 시장 상황을 확인 후 다시 실행해주세요.")
+                break
 
             await asyncio.sleep(config.LOOP_DELAY)
 
