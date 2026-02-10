@@ -8,7 +8,7 @@ except Exception:
 # =========================================================
 # [1. 시스템 및 API 설정]
 # =========================================================
-IS_SIMULATION = True  # 실전 여부 (True=가상매매)
+IS_SIMULATION = False  # 실전 여부 (True=가상매매) (False=실전매매)
 UPBIT_ACCESS_KEY = os.getenv("UPBIT_ACCESS_KEY", "")
 UPBIT_SECRET_KEY = os.getenv("UPBIT_SECRET_KEY", "")
 
@@ -24,7 +24,7 @@ SIMULATION_BALANCE = 1_000_000_000 # 모의 투자 시작 금액
 # [2. 타겟 및 자산 설정]
 # =========================================================
 CURRENT_EXCHANGE_RATE = 1465.09
-TRADE_AMOUNT = 10_000_000  # 1회 진입 금액 (1억원)
+TRADE_AMOUNT = 10_000  # 1회 진입 금액 (만만원)
 
 # ✅ [신규] 리스크 관리 (Dynamic Sizing) 설정
 MAX_ASSET_RATIO = 0.25     # 자산의 25%까지만 한 종목에 투자 (몰빵 방지)
